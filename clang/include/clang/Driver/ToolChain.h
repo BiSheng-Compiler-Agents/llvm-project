@@ -166,6 +166,7 @@ private:
   mutable std::unique_ptr<Tool> OffloadBundler;
   mutable std::unique_ptr<Tool> OffloadPackager;
   mutable std::unique_ptr<Tool> LinkerWrapper;
+  mutable std::unique_ptr<Tool> ProteanTool;
 
   Tool *getClang() const;
   Tool *getFlang() const;
@@ -177,6 +178,7 @@ private:
   Tool *getOffloadBundler() const;
   Tool *getOffloadPackager() const;
   Tool *getLinkerWrapper() const;
+  Tool *getProteanTool() const;
 
   mutable bool SanitizerArgsChecked = false;
   mutable std::unique_ptr<XRayArgs> XRayArguments;

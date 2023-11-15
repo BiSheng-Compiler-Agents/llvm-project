@@ -172,6 +172,21 @@ public:
                     const char *LinkingOutput) const override;
 };
 
+/// Protean Simulated Annealing Optimizer tool
+class LLVM_LIBRARY_VISIBILITY ProteanSAOptimizer final : public Tool {
+public:
+  ProteanSAOptimizer(const ToolChain &TC)
+      : Tool("Optimizer tool that iteratively modifies provided IR using "
+             "Simulated Annealing to find best optimization.",
+             "protean", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+};
+
 /// Linker wrapper tool.
 class LLVM_LIBRARY_VISIBILITY LinkerWrapper final : public Tool {
   const Tool *Linker;

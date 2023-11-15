@@ -300,6 +300,9 @@ public:
   ModulePassManager buildO0DefaultPipeline(OptimizationLevel Level,
                                            bool LTOPreLink = false);
 
+  /// Build a pipeline for Protean Compiler initial phase.
+  ModulePassManager buildProteanInitialPipeline();
+
   /// Build the default `AAManager` with the default alias analysis pipeline
   /// registered.
   ///
