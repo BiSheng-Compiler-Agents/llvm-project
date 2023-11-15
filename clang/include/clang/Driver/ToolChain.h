@@ -177,6 +177,7 @@ private:
   mutable std::unique_ptr<Tool> OffloadBundler;
   mutable std::unique_ptr<Tool> OffloadPackager;
   mutable std::unique_ptr<Tool> LinkerWrapper;
+  mutable std::unique_ptr<Tool> ProteanTool;
 
   Tool *getClang() const;
   Tool *getFlang() const;
@@ -188,6 +189,7 @@ private:
   Tool *getOffloadBundler() const;
   Tool *getOffloadPackager() const;
   Tool *getLinkerWrapper() const;
+  Tool *getProteanTool() const;
 
   /// Track if diagnostics have been emitted for sanitizer arguments already to
   /// avoid duplicate diagnostics.

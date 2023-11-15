@@ -333,6 +333,40 @@ static void addCoveragePrefixMapArg(const Driver &D, const ArgList &Args,
   }
 }
 
+/// Vectorize at all optimization levels greater than 1 except for -Oz.
+/// For -Oz the loop vectorizer is disabled, while the slp vectorizer is
+/// enabled.
+static bool shouldEnableVectorizerAtOLevel(const ArgList &Args, bool isSlpVec) {
+  if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    if (A->getOption().matches(options::OPT_OP) ||
+        A->getOption().matches(options::OPT_O4) ||
+        A->getOption().matches(options::OPT_Ofast))
+      return true;
+
+    if (A->getOption().matches(options::OPT_O0))
+      return false;
+
+    assert(A->getOption().matches(options::OPT_O) && "Must have a -O flag");
+
+    // Vectorize -Os.
+    StringRef S(A->getValue());
+    if (S == "s")
+      return true;
+
+    // Don't vectorize -Oz, unless it's the slp vectorizer.
+    if (S == "z")
+      return isSlpVec;
+
+    unsigned OptLevel = 0;
+    if (S.getAsInteger(10, OptLevel))
+      return false;
+
+    return OptLevel > 1;
+  }
+
+  return false;
+}
+
 /// Add -x lang to \p CmdArgs for \p Input.
 static void addDashXForInput(const ArgList &Args, const InputInfo &Input,
                              ArgStringList &CmdArgs) {
@@ -5731,6 +5765,18 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       break;
     }
 
+    // Optimization level for CodeGen.
+    if (const Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+      if (A->getOption().matches(options::OPT_OP)) {
+        CmdArgs.push_back("-O3");
+      } else if (A->getOption().matches(options::OPT_O4)) {
+        CmdArgs.push_back("-O3");
+        D.Diag(diag::warn_O4_is_O3);
+      } else {
+        A->render(Args, CmdArgs);
+      }
+    }
+
     // Input/Output file.
     if (Output.getType() == types::TY_Dependencies) {
       // Handled with other dependency code.
@@ -6683,6 +6729,23 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // When building with ccache, it will pass -D options to clang even on
   // preprocessed inputs and configure concludes that -fPIC is not supported.
   Args.ClaimAllArgs(options::OPT_D);
+
+  // Manually translate -O4 to -O3; let clang reject others.
+  if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    if (A->getOption().matches(options::OPT_OP) ||
+        A->getOption().matches(options::OPT_O4)) {
+      CmdArgs.push_back("-O3");
+      if (A->getOption().matches(options::OPT_OP)) {
+        // For protean compiler we just need to invoke the initial protean
+        // pipeline. Further optimizations will be done by the protean step.
+        CmdArgs.push_back("-mllvm");
+        CmdArgs.push_back("-protean");
+      } else
+        D.Diag(diag::warn_O4_is_O3);
+    } else {
+      A->render(Args, CmdArgs);
+    }
+  }
 
   // Warn about ignored options to clang.
   for (const Arg *A :
@@ -9923,6 +9986,25 @@ void LinkerWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   else
     CmdArgs.push_back(Args.MakeArgString("--host-triple=" +
                                          getToolChain().getTripleString()));
+                                         
+  // Pass in the optimization level to use for LTO.
+  if (const Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    StringRef OOpt;
+    if (A->getOption().matches(options::OPT_OP) ||
+        A->getOption().matches(options::OPT_O4) ||
+        A->getOption().matches(options::OPT_Ofast))
+      OOpt = "3";
+    else if (A->getOption().matches(options::OPT_O)) {
+      OOpt = A->getValue();
+      if (OOpt == "g")
+        OOpt = "1";
+      else if (OOpt == "s" || OOpt == "z")
+        OOpt = "2";
+    } else if (A->getOption().matches(options::OPT_O0))
+      OOpt = "0";
+    if (!OOpt.empty())
+      CmdArgs.push_back(Args.MakeArgString(Twine("--opt-level=O") + OOpt));
+  }
 
   if (Args.hasArg(options::OPT_v) && !SuppressHIPNoRDCVerbose)
     CmdArgs.push_back("--wrapper-verbose");
@@ -10053,4 +10135,45 @@ void LinkerWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   // wrapper.
   LinkCommand->replaceExecutable(Exec);
   LinkCommand->replaceArguments(CmdArgs);
+}
+
+void ProteanSAOptimizer::ConstructJob(Compilation &C, const JobAction &JA,
+                                      const InputInfo &Output,
+                                      const InputInfoList &Inputs,
+                                      const llvm::opt::ArgList &TCArgs,
+                                      const char *LinkingOutput) const {
+  assert(isa<ProteanSAOptimizerJobAction>(JA) &&
+         "Expecting a Protean SA Optimizer action.");
+
+  (void)LinkingOutput;
+  ArgStringList CmdArgs;
+
+  // Pass the optimization level as well as the include and library paths to the
+  // host compiler
+
+  // Forward `-mllvm` arguments to the LLVM invocations if present.
+  for (Arg *A : TCArgs.filtered(options::OPT_mllvm)) {
+    CmdArgs.push_back(A->getValue());
+    A->claim();
+  }
+
+  // Set inputs
+  for (const auto &II : Inputs) {
+    if (II.isFilename())
+      CmdArgs.push_back(II.getFilename());
+  }
+
+  // Do nothing for now
+  // Emit object file from protean compiler step.
+  CmdArgs.push_back("-passes=verify");
+
+  // Set output
+  assert(Output.isFilename() && "output must be a filename");
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(Output.getFilename());
+
+  C.addCommand(std::make_unique<Command>(
+      JA, *this, ResponseFileSupport::None(),
+      TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+      CmdArgs, Inputs));
 }

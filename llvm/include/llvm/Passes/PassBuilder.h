@@ -314,6 +314,9 @@ public:
   buildO0DefaultPipeline(OptimizationLevel Level,
                          ThinOrFullLTOPhase Phase = ThinOrFullLTOPhase::None);
 
+  /// Build a pipeline for Protean Compiler initial phase.
+  ModulePassManager buildProteanInitialPipeline();
+
   /// Build the default `AAManager` with the default alias analysis pipeline
   /// registered.
   ///

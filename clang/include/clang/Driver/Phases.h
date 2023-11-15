@@ -18,6 +18,7 @@ namespace phases {
     Preprocess,
     Precompile,
     Compile,
+    ProteanOpt,
     Backend,
     Assemble,
     Link,

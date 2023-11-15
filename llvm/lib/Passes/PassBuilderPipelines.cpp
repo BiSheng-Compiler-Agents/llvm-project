@@ -306,6 +306,7 @@ static cl::opt<AttributorRunOption> AttributorRun(
 static cl::opt<bool> EnableSampledInstr(
     "enable-sampled-instrumentation", cl::init(false), cl::Hidden,
     cl::desc("Enable profile instrumentation sampling (default = off)"));
+
 static cl::opt<bool> UseLoopVersioningLICM(
     "enable-loop-versioning-licm", cl::init(false), cl::Hidden,
     cl::desc("Enable the experimental Loop Versioning LICM pass"));
@@ -315,6 +316,19 @@ static cl::opt<std::string> InstrumentColdFuncOnlyPath(
     cl::desc("File path for cold function only instrumentation(requires use "
              "with --pgo-instrument-cold-function-only)"),
     cl::Hidden);
+
+static cl::opt<bool>
+    EnableEarlyIndVarSimplify("enable-early-IndVarSimplify", cl::Hidden,
+                              cl::desc("Enable early indvarsimplify"),
+                              cl::init(false));
+
+static cl::opt<bool> UseProteanInitialPasses(
+    "protean", cl::init(false), cl::Hidden,
+    cl::desc("Enable Protean Compiler initial pass set in place of default pass"
+             " sequence"));
+
+namespace llvm {
+extern cl::opt<bool> EnableMemProfContextDisambiguation;
 
 // TODO: There is a similar flag in WPD pass, we should consolidate them by
 // parsing the option only once in PassBuilder and share it across both places.
@@ -1755,6 +1769,9 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
   if (Level == OptimizationLevel::O0)
     return buildO0DefaultPipeline(Level, Phase);
 
+  if ((Level == OptimizationLevel::O3) && UseProteanInitialPasses)
+    return buildProteanInitialPipeline();
+
   ModulePassManager MPM;
   instructionCountersPass(MPM, /* IsPreOptimization */ true);
   // Currently this pipeline is only invoked in an LTO pre link pass or when we
@@ -2516,6 +2533,26 @@ PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
   addAnnotationRemarksPass(MPM);
 
   instructionCountersPass(MPM, /* IsPreOptimization */ false);
+
+  return MPM;
+}
+
+ModulePassManager PassBuilder::buildProteanInitialPipeline() {
+  ModulePassManager MPM;
+  ThinOrFullLTOPhase LTOPhase = ThinOrFullLTOPhase::None;
+  OptimizationLevel Level = OptimizationLevel::O3;
+
+  // Convert @llvm.global.annotations to !annotation metadata.
+  MPM.addPass(Annotation2MetadataPass());
+
+  // Force any function attributes we want the rest of the pipeline to observe.
+  MPM.addPass(ForceFunctionAttrsPass());
+
+  // Apply module pipeline start EP callback.
+  invokePipelineStartEPCallbacks(MPM, Level);
+
+  // Add the core simplification pipeline.
+  MPM.addPass(buildModuleSimplificationPipeline(Level, LTOPhase));
 
   return MPM;
 }

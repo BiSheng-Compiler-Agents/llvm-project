@@ -74,6 +74,7 @@ public:
     OffloadPackagerJobClass,
     LinkerWrapperJobClass,
     StaticLibJobClass,
+    ProteanSAOptimizerJobClass,
     BinaryAnalyzeJobClass,
     BinaryTranslatorJobClass,
     ObjcopyJobClass,
@@ -616,6 +617,17 @@ public:
 
   static bool classof(const Action *A) {
     return A->getKind() == StaticLibJobClass;
+  }
+};
+
+class ProteanSAOptimizerJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  ProteanSAOptimizerJobAction(Action *Input, types::ID Type);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == ProteanSAOptimizerJobClass;
   }
 };
 

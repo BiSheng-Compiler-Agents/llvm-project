@@ -36,7 +36,7 @@
 
 // C family source language (with and without preprocessing).
 TYPE("cpp-output",               PP_C,         INVALID,         "i",      phases::Compile, phases::Backend, phases::Assemble, phases::Link)
-TYPE("c",                        C,            PP_C,            "c",      phases::Preprocess, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
+TYPE("c",                        C,            PP_C,            "c",      phases::Preprocess, phases::Compile, phases::ProteanOpt, phases::Backend, phases::Assemble, phases::Link)
 TYPE("cl",                       CL,           PP_CL,           "cl",     phases::Preprocess, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("cl-cpp-output",            PP_CL,        INVALID,         "cli",    phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("clcpp",                    CLCXX,        PP_CLCXX,        "clcpp",  phases::Preprocess, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
@@ -51,7 +51,7 @@ TYPE("objective-c-cpp-output",   PP_ObjC,      INVALID,         "mi",     phases
 TYPE("objc-cpp-output",          PP_ObjC_Alias, INVALID,        "mi",     phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("objective-c",              ObjC,         PP_ObjC,         "m",      phases::Preprocess, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("c++-cpp-output",           PP_CXX,       INVALID,         "ii",     phases::Compile, phases::Backend, phases::Assemble, phases::Link)
-TYPE("c++",                      CXX,          PP_CXX,          "cpp",    phases::Preprocess, phases::Compile, phases::Backend, phases::Assemble, phases::Link)
+TYPE("c++",                      CXX,          PP_CXX,          "cpp",    phases::Preprocess, phases::Compile, phases::ProteanOpt, phases::Backend, phases::Assemble, phases::Link)
 TYPE("objective-c++-cpp-output", PP_ObjCXX,    INVALID,         "mii",    phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("objc++-cpp-output",        PP_ObjCXX_Alias, INVALID,      "mii",    phases::Compile, phases::Backend, phases::Assemble, phases::Link)
 TYPE("objective-c++",            ObjCXX,       PP_ObjCXX,       "mm",     phases::Preprocess, phases::Compile, phases::Backend, phases::Assemble, phases::Link)

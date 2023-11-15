@@ -46,6 +46,8 @@ const char *Action::getClassName(ActionClass AC) {
     return "clang-linker-wrapper";
   case StaticLibJobClass:
     return "static-lib-linker";
+  case ProteanSAOptimizerJobClass:
+    return "protean-sa-optimizer";
   case BinaryAnalyzeJobClass:
     return "binary-analyzer";
   case BinaryTranslatorJobClass:
@@ -446,6 +448,12 @@ void StaticLibJobAction::anchor() {}
 
 StaticLibJobAction::StaticLibJobAction(ActionList &Inputs, types::ID Type)
     : JobAction(StaticLibJobClass, Inputs, Type) {}
+
+void ProteanSAOptimizerJobAction::anchor() {}
+
+ProteanSAOptimizerJobAction::ProteanSAOptimizerJobAction(Action *Input,
+                                                         types::ID Type)
+    : JobAction(ProteanSAOptimizerJobClass, Input, Type) {}
 
 void BinaryAnalyzeJobAction::anchor() {}
 
