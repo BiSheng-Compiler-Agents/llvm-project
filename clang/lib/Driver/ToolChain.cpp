@@ -529,6 +529,12 @@ Tool *ToolChain::getLinkerWrapper() const {
   return LinkerWrapper.get();
 }
 
+Tool *ToolChain::getProteanTool() const {
+  if (!ProteanTool)
+    ProteanTool.reset(new tools::ProteanSAOptimizer(*this));
+  return ProteanTool.get();
+}
+
 Tool *ToolChain::getTool(Action::ActionClass AC) const {
   switch (AC) {
   case Action::AssembleJobClass:
@@ -561,6 +567,9 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
   case Action::VerifyPCHJobClass:
   case Action::BackendJobClass:
     return getClang();
+
+  case Action::ProteanSAOptimizerJobClass:
+    return getProteanTool();
 
   case Action::OffloadBundlingJobClass:
   case Action::OffloadUnbundlingJobClass:

@@ -388,9 +388,13 @@ llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases>
 types::getCompilationPhases(ID Id, phases::ID LastPhase) {
   llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> P;
   const auto &Info = getInfo(Id);
-  for (int I = 0; I <= LastPhase; ++I)
+  for (int I = 0; I <= LastPhase; ++I) {
+    if ((static_cast<phases::ID>(I) == phases::ProteanOpt) &&
+        !isProteanOptimizerEnabled())
+      continue;
     if (Info.Phases.contains(static_cast<phases::ID>(I)))
       P.push_back(static_cast<phases::ID>(I));
+  }
   assert(P.size() <= phases::MaxNumberOfPhases && "Too many phases in list");
   return P;
 }

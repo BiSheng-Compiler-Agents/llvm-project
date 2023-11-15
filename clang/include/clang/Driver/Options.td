@@ -922,6 +922,8 @@ def O0 : Flag<["-"], "O0">, Group<O_Group>, Flags<[HelpHidden]>,
   Visibility<[ClangOption, CC1Option, FC1Option, FlangOption]>;
 def O4 : Flag<["-"], "O4">, Group<O_Group>, Flags<[HelpHidden]>,
   Visibility<[ClangOption, CC1Option, FC1Option, FlangOption]>;
+def OP : Flag<["-"], "OP">, Group<O_Group>, Flags<[HelpHidden]>,
+  Visibility<[ClangOption, CC1Option, FC1Option, FlangOption]>;
 def ObjCXX : Flag<["-"], "ObjC++">, Flags<[NoXarchOption]>,
   HelpText<"Treat source input files as Objective-C++ inputs">;
 def ObjC : Flag<["-"], "ObjC">, Flags<[NoXarchOption]>,

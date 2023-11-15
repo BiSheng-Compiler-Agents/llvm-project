@@ -107,6 +107,8 @@ using namespace clang::driver;
 using namespace clang;
 using namespace llvm::opt;
 
+static bool ProteanOptimizerFlag = false;
+
 static std::optional<llvm::Triple> getOffloadTargetTriple(const Driver &D,
                                                           const ArgList &Args) {
   auto OffloadTargets = Args.getAllArgValues(options::OPT_offload_EQ);
@@ -169,6 +171,9 @@ getHIPOffloadTargetTriple(const Driver &D, const ArgList &Args) {
   D.Diag(diag::err_drv_invalid_or_unsupported_offload_target) << TT->str();
   return std::nullopt;
 }
+
+bool isProteanOptimizerEnabled() { return ProteanOptimizerFlag; }
+void enableProteanOptimizer() { ProteanOptimizerFlag = true; }
 
 // static
 std::string Driver::GetResourcesPath(StringRef BinaryPath,
@@ -4113,6 +4118,11 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
                           const InputList &Inputs, ActionList &Actions) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
 
+  // Set protean optimization flag on.
+  if (const Arg *A = Args.getLastArg(options::OPT_O_Group))
+    if (A->getOption().matches(options::OPT_OP))
+      enableProteanOptimizer();
+
   if (!SuppressMissingInputWarning && Inputs.empty()) {
     Diag(clang::diag::err_drv_no_input_files);
     return;
@@ -4847,6 +4857,9 @@ Action *Driver::ConstructPhaseAction(
       return C.MakeAction<ExtractAPIJobAction>(Input, types::TY_API_INFO);
     return C.MakeAction<CompileJobAction>(Input, types::TY_LLVM_BC);
   }
+  case phases::ProteanOpt:
+    return C.MakeAction<ProteanSAOptimizerJobAction>(Input, types::TY_LLVM_BC);
+
   case phases::Backend: {
     if (isUsingLTO() && TargetDeviceOffloadKind == Action::OFK_None) {
       types::ID Output;

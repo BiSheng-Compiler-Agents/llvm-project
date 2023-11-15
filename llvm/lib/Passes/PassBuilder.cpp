@@ -559,6 +559,7 @@ static std::optional<OptimizationLevel> parseOptLevel(StringRef S) {
       .Case("O1", OptimizationLevel::O1)
       .Case("O2", OptimizationLevel::O2)
       .Case("O3", OptimizationLevel::O3)
+      .Case("OP", OptimizationLevel::O3)
       .Case("Os", OptimizationLevel::Os)
       .Case("Oz", OptimizationLevel::Oz)
       .Default(std::nullopt);

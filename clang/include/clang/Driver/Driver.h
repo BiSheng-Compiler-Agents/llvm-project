@@ -43,6 +43,10 @@ class ExpansionContext;
 }
 } // namespace llvm
 
+// Set a flag to enable or disable protean compiler flow.
+bool isProteanOptimizerEnabled();
+void enabledProteanOptimizer();
+
 namespace clang {
 
 namespace driver {
