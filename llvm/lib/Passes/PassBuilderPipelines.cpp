@@ -309,7 +309,7 @@ static cl::opt<bool>
                               cl::desc("Enable early indvarsimplify"),
                               cl::init(false));
 
-static cl::opt<bool> UseProteanInitialPasses(
+cl::opt<bool> UseProteanInitialPasses(
     "protean", cl::init(false), cl::Hidden,
     cl::desc("Enable Protean Compiler initial pass set in place of default pass"
              " sequence"));
