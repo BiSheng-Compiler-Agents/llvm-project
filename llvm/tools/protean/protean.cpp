@@ -1,8 +1,10 @@
-//===- opt.cpp - The LLVM Modular Optimizer -------------------------------===//
+//===- protean.cpp - The Simulated Annealing Optimizer --------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Copyright (C) 2024, Huawei Technologies Co., Ltd. All rights reserved.
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +18,7 @@
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/RegionPass.h"
+#include "llvm/Analysis/SimulatedAnnealing.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/AsmParser/Parser.h"
@@ -57,12 +60,16 @@
 #include "llvm/Transforms/Utils/Debugify.h"
 #include <algorithm>
 #include <memory>
+#include <filesystem>
 #include <optional>
 
 using namespace llvm;
 using namespace opt_tool;
 
 static codegen::RegisterCodeGenFlags CFG;
+
+// In "llvm/lib/Passes/PassBuilderPipelines.cpp"
+extern cl::opt<bool> UseProteanInitialPasses;
 
 // The OptimizationList is automatically populated with registered Passes by the
 // PassNameParser.
@@ -679,6 +686,106 @@ int main(int argc, char **argv) {
       Pipeline = "default<Os>";
     if (OptLevelOz)
       Pipeline = "default<Oz>";
+
+    // If protean is enabled goto the Simulated Annealing process:
+    //   The Simulated Annealing process first creates an random recipe then it creates a forked
+    //   process.
+    //     (1) The parent process wait's for the child process and continue the
+    //     Simulated Annealing main loop.
+    //     (2) The child process will return back here and modify
+    //     the Pipeline according to the randomly generated recipe.
+    // At the end of the Simulated Annealing loop the parnet process will just exit/return from
+    // here.
+    if (UseProteanInitialPasses.getValue()) {
+      std::string Recipes;
+      // TODO: Add CMD option for number maximum iteartions on Simulated Annealing .
+      // For now: Just use 3 iterations.
+      SimulatedAnnealingProtean SAProtean{};
+      SAProtean.run(3);
+      if (SAProtean.getFinished()) {
+        // TODO: Guard with debug messages later.
+        outs() << "Simulated Annealing finished running. ";
+        outs() << "The final recipe accepted is: "
+               << PhaseOrderGeneratorBase::RecipesToPasses(
+                      SAProtean.getFinalState())
+               << "\n";
+        std::string RecipeStr =
+            PhaseOrderGeneratorBase::RecipesToString(SAProtean.getFinalState());
+        std::error_code EC;
+
+        // Find the best recipe and copy it to the appropriate file names.
+        std::string RecipeOutputFilename = OutputFilename;
+        RecipeOutputFilename.insert(RecipeOutputFilename.find_last_of("."),
+                                    "-" + RecipeStr);
+        std::filesystem::copy(RecipeOutputFilename, OutputFilename.getValue(),
+                              EC);
+        if (EC) {
+          errs() << EC.message() << '\n';
+          return 1;
+        }
+
+        if (!ThinLinkBitcodeFile.empty()) {
+          std::string RecipeThinLinkBitcodeFile = ThinLinkBitcodeFile;
+          RecipeThinLinkBitcodeFile.insert(
+              RecipeThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
+
+          std::filesystem::copy(RecipeThinLinkBitcodeFile,
+                                ThinLinkBitcodeFile.getValue(), EC);
+          if (EC) {
+            errs() << EC.message() << '\n';
+            return 1;
+          }
+        }
+
+        // Keep the files to prevent deletion.
+        if (Out.get())
+          Out.get()->keep();
+        if (ThinLinkOut.get())
+          ThinLinkOut.get()->keep();
+        if (RemarksFile.get())
+          RemarksFile.get()->keep();
+        return 0;
+      } else {
+        // Reset the outputfile name for each recipe.
+        // NOTE: For now we don't care about the remark files.
+        // TODO: Need the Simulated Annealing to keep track of already visited states thus we do
+        // reuse the same recipe in previous iterations.
+        std::string RecipeStr =
+            PhaseOrderGeneratorBase::RecipesToString(SAProtean.getCurState());
+
+        std::error_code EC;
+        sys::fs::OpenFlags Flags =
+            OutputAssembly ? sys::fs::OF_TextWithCRLF : sys::fs::OF_None;
+
+        // Reset for outputfile
+        std::string NewOutputFilename = OutputFilename;
+        NewOutputFilename.insert(NewOutputFilename.find_last_of("."),
+                                 "-" + RecipeStr);
+        Out.reset(new ToolOutputFile(NewOutputFilename, EC, Flags));
+
+        // Reset for ThinLinkBitcodeFile
+        if (!ThinLinkBitcodeFile.empty()) {
+          std::string NewThinLinkBitcodeFile = ThinLinkBitcodeFile;
+          NewThinLinkBitcodeFile.insert(
+              NewThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
+          ThinLinkOut.reset(
+              new ToolOutputFile(ThinLinkBitcodeFile, EC, sys::fs::OF_None));
+          if (EC) {
+            errs() << EC.message() << '\n';
+            return 1;
+          }
+        }
+
+        Recipes =
+            PhaseOrderGeneratorBase::RecipesToPasses(SAProtean.getCurState());
+      }
+      outs() << "Running Recipe: " << Recipes << "\n";
+      if (!Pipeline.empty())
+        Pipeline += ",";
+      Pipeline += Recipes;
+      outs() << "Pipeline: " << Pipeline << "\n";
+    }
+
     OutputKind OK = OK_NoOutput;
     if (!NoOutput)
       OK = OutputAssembly
