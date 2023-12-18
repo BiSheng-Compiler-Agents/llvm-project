@@ -173,6 +173,7 @@ add_llvm_component_library(LLVMAnalysis
   OptimizationRemarkEmitter.cpp
   OverflowInstAnalysis.cpp
   PHITransAddr.cpp
+  PhaseOrder.cpp
   PhiValues.cpp
   PostDominators.cpp
   ProfileSummaryInfo.cpp
@@ -187,6 +188,7 @@ add_llvm_component_library(LLVMAnalysis
   ScalarEvolutionDivision.cpp
   ScalarEvolutionNormalization.cpp
   StaticDataProfileInfo.cpp
+  SimulatedAnnealing.cpp
   StackLifetime.cpp
   StackSafetyAnalysis.cpp
   StructuralHash.cpp
