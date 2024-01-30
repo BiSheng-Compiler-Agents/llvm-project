@@ -66,6 +66,9 @@
 using namespace llvm;
 using namespace opt_tool;
 
+#undef DEBUG_TYPE
+#define DEBUG_TYPE "protean"
+
 static codegen::RegisterCodeGenFlags CFG;
 
 // In "llvm/lib/Passes/PassBuilderPipelines.cpp"
@@ -286,6 +289,13 @@ static cl::list<std::string>
     PassPlugins("load-pass-plugin",
                 cl::desc("Load passes from plugin library"));
 
+static cl::opt<std::string>
+    CoolingType("cooling",
+                cl::desc("Choose cooling schedule"), cl::init("geometric"));
+
+static cl::opt<unsigned>
+    MaxIterations("max-iterations",
+                cl::desc("Specify Maximum Iterations for Simulated Annealing"), cl::init(50));
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
 //
@@ -698,17 +708,17 @@ int main(int argc, char **argv) {
     // here.
     if (UseProteanInitialPasses.getValue()) {
       std::string Recipes;
-      // TODO: Add CMD option for number maximum iteartions on Simulated Annealing .
-      // For now: Just use 3 iterations.
-      SimulatedAnnealingProtean SAProtean{};
-      SAProtean.run(3);
+
+
+      SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(CoolingType,MaxIterations);
+      SAProtean.run();
       if (SAProtean.getFinished()) {
         // TODO: Guard with debug messages later.
-        outs() << "Simulated Annealing finished running. ";
-        outs() << "The final recipe accepted is: "
-               << PhaseOrderGeneratorBase::RecipesToPasses(
-                      SAProtean.getFinalState())
-               << "\n";
+        LLVM_DEBUG(dbgs() << "Simulated Annealing finished running. ");
+        LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
+                          << PhaseOrderGeneratorBase::RecipesToPasses(
+                                 SAProtean.getFinalState())
+                          << "\n");
         std::string RecipeStr =
             PhaseOrderGeneratorBase::RecipesToString(SAProtean.getFinalState());
         std::error_code EC;
@@ -779,11 +789,11 @@ int main(int argc, char **argv) {
         Recipes =
             PhaseOrderGeneratorBase::RecipesToPasses(SAProtean.getCurState());
       }
-      outs() << "Running Recipe: " << Recipes << "\n";
+      LLVM_DEBUG(dbgs() << "Running Recipe: " << Recipes << "\n");
       if (!Pipeline.empty())
         Pipeline += ",";
       Pipeline += Recipes;
-      outs() << "Pipeline: " << Pipeline << "\n";
+      LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
     }
 
     OutputKind OK = OK_NoOutput;
