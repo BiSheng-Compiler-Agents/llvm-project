@@ -37,7 +37,7 @@ public:
   //  Output final state s
   //
   // Goal: Find argmin E(s)
-  virtual void run(int Max = 1) = 0;
+  virtual void run() = 0;
 
   bool getFinished() const { return Finished; }
 
@@ -49,7 +49,7 @@ public:
   void setCurState(State S) { CurState = S; }
 
   // Given a time budget, return a temperature.
-  virtual double temperature(double budget) = 0;
+  virtual double temperature(int Iteration) = 0;
 
   // Given a state S, return a neighbour.
   virtual State neighbour(State S) = 0;
@@ -69,13 +69,19 @@ private:
   std::unique_ptr<PhaseOrderGeneratorBase> Generator;
 
 public:
-  SimulatedAnnealingProtean();
+  std::string CoolingSchedule;
+  double MaxTemperature;
+  double MinTemperature;
+  double CoolingRate;
+  unsigned int MaxIterations;
+  SimulatedAnnealingProtean(std::string CoolingSchedule,
+                            unsigned int MaxIterations);
 
   using State = PhaseOrderGeneratorBase::Recipes;
-  void run(int Max = 1) override;
+  void run() override;
 
   // Identity function.
-  double temperature(double budget) override;
+  double temperature(int Iteration) override;
 
   // Use the PhaseOrderGeneratorBase to generate a random recipe.
   State neighbour(State S) override;

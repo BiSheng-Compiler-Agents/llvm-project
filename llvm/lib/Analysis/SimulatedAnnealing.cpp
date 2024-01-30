@@ -14,15 +14,26 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/SimulatedAnnealing.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <random>
 #include <sys/wait.h>
 #include <unistd.h>
 
-SimulatedAnnealingProtean::SimulatedAnnealingProtean()
-    : Generator{new PhaseOrderGeneratorBase()} {}
+#undef DEBUG_TYPE
+#define DEBUG_TYPE "protean"
+
+SimulatedAnnealingProtean::SimulatedAnnealingProtean(
+    std::string CoolingSchedule, unsigned int MaxIterations)
+    : Generator{new PhaseOrderGeneratorBase()} {
+  this->CoolingSchedule = CoolingSchedule;
+  this->MaxIterations = MaxIterations;
+  this->MaxTemperature = 100.0;
+  this->MinTemperature = 0.1;
+}
 
 // Generate a random int from [Min, Max]
 static int randInt(int Min, int Max) {
@@ -32,11 +43,15 @@ static int randInt(int Min, int Max) {
   return Distr(Gen);
 }
 
-void SimulatedAnnealingProtean::run(int Max) {
+void SimulatedAnnealingProtean::run() {
   SimulatedAnnealingProtean::State S = Generator->generateRecipe();
-
-  for (int it = 0; it < Max; ++it) {
-    double Temp = temperature(1 - (it + 1) / Max);
+  for (int Iteration = 0; Iteration < this->MaxIterations + 1; ++Iteration) {
+    double Temp = temperature(Iteration);
+    LLVM_DEBUG(llvm::dbgs()
+               << "Iteration " << Iteration << " Temperature:" << Temp << "\n");
+    if (Temp <= 0.1) {
+      break;
+    }
     SimulatedAnnealingProtean::State SNew = Generator->generateRecipe(S);
     setCurState(SNew);
 
@@ -48,10 +63,12 @@ void SimulatedAnnealingProtean::run(int Max) {
       int Wstatus;
       waitpid(Pid, &Wstatus, 0);
       if (!WIFEXITED(Wstatus)) {
-        llvm::outs() << "Recipe exited unexpected: "
-                     << PhaseOrderGeneratorBase::RecipesToString(SNew) << "\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "Recipe exited unexpected: "
+                   << PhaseOrderGeneratorBase::RecipesToString(SNew) << "\n");
       } else {
-        llvm::outs() << "Child exited with: " << WEXITSTATUS(Wstatus) << "\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "Child exited with: " << WEXITSTATUS(Wstatus) << "\n\n");
       }
     } else {
       return;
@@ -59,10 +76,11 @@ void SimulatedAnnealingProtean::run(int Max) {
 
     // Accept or reject the new state.
     if (P(S, SNew, Temp) >= ((double)randInt(0, INT_MAX) / (double)INT_MAX)) {
+      LLVM_DEBUG(llvm::dbgs() << "New state accepted\n");
       S = SNew;
     }
   }
-  setFinalState(S);
+  setFinalState(getCurState());
   setFinished(true);
 }
 
@@ -71,14 +89,32 @@ SimulatedAnnealingProtean::neighbour(SimulatedAnnealingProtean::State S) {
   return Generator->generateRecipe(S);
 }
 
-double SimulatedAnnealingProtean::temperature(double Budget) { return Budget; }
+double SimulatedAnnealingProtean::temperature(int Iteration) {
+  // Generate new temperature based on cooling schedule
+  if (this->CoolingSchedule == "geometric") {
+    CoolingRate = pow(MinTemperature / MaxTemperature, 1.0 / (MaxIterations));
+    return MaxTemperature * pow(CoolingRate, Iteration);
+  } else if (this->CoolingSchedule == "linear") {
+    CoolingRate = (MinTemperature + MaxTemperature) / MaxIterations;
+    return this->MaxTemperature - this->CoolingRate * Iteration;
+  }
+  return 0.0;
+}
 
 double SimulatedAnnealingProtean::E(SimulatedAnnealingProtean::State S) {
-  return 0;
+  // perform IR analysis to determine cost of current state
+
+  return randInt(0, 100);
 }
 
 double SimulatedAnnealingProtean::P(SimulatedAnnealingProtean::State S,
                                     SimulatedAnnealingProtean::State SNew,
                                     double Temperature) {
-  return 1;
+  double Diff = E(SNew) - E(S);
+  // If new state is worse than old, use equation below to calculate probability
+  // of accepting new state
+  if (Diff >= 0)
+    return exp(-1 * Diff / Temperature);
+  // If new state is better than old, accept new state
+  return 1.0;
 }
