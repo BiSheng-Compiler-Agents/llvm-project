@@ -128,6 +128,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRPrinter/IRPrintingPasses.h"
 #include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Passes/PassMapBuilder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -2290,6 +2291,10 @@ void PassBuilder::printPassNames(raw_ostream &OS) {
   OS << "Machine function analyses (WIP):\n";
 #define MACHINE_FUNCTION_ANALYSIS(NAME, CREATE_PASS) printPassName(NAME, OS);
 #include "llvm/Passes/MachinePassRegistry.def"
+}
+
+std::unordered_map<std::string, std::string> PassBuilder::createPassMap() {
+  return initializePassMap();
 }
 
 void PassBuilder::registerParseTopLevelPipelineCallback(

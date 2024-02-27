@@ -562,3 +562,8 @@ void llvm::printPasses(raw_ostream &OS) {
   PassBuilder PB;
   PB.printPassNames(OS);
 }
+
+std::unordered_map<std::string, std::string> llvm::createPassMap() {
+  PassBuilder PB;
+  return PB.createPassMap();
+}
