@@ -418,6 +418,8 @@ public:
   /// Print pass names.
   LLVM_ABI void printPassNames(raw_ostream &OS);
 
+  std::unordered_map<std::string, std::string> createPassMap();
+
   /// Register a callback for a default optimizer pipeline extension
   /// point
   ///

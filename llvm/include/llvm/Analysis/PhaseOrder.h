@@ -15,8 +15,8 @@
 #ifndef PHASE_ORDER_H
 #define PHASE_ORDER_H
 
-#include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // This class should handle generating a phase ordering recipe.
@@ -27,19 +27,19 @@ public:
 
   // Define a recipe type
   using Recipes = std::vector<Recipe>;
-
+  using PMap = std::unordered_map<std::string, std::string>;
   // Generate a random recipe.
   virtual Recipes generateRecipe();
 
   // Given a recipe R generate another recipe.
-  virtual Recipes generateRecipe(Recipes R);
+  virtual Recipes generateRecipe(Recipes const &R);
 
-  static std::string RecipesToPasses(Recipes);
-  static std::string RecipesToString(Recipes);
+  static std::string recipesToPasses(Recipes const &R, PMap &PassMap);
+  static std::string recipesToString(Recipes const &R);
 
 private:
-  static std::map<Recipe, std::string> RecipeToPassOrders;
-  static std::map<Recipe, std::string> RecipeToString;
+  static std::unordered_map<Recipe, std::string> RecipeToPassOrders;
+  static std::unordered_map<Recipe, std::string> RecipeToString;
 };
 
 #endif

@@ -44,23 +44,24 @@ public:
   void setFinished(bool F) { Finished = F; }
 
   State getFinalState() const { return FinalState; }
-  void setFinalState(State S) { FinalState = S; }
+  void setFinalState(State &S) { FinalState = S; }
   State getCurState() const { return CurState; }
-  void setCurState(State S) { CurState = S; }
+  void setCurState(State &S) { CurState = S; }
 
   // Given a time budget, return a temperature.
   virtual double temperature(int Iteration) = 0;
 
   // Given a state S, return a neighbour.
-  virtual State neighbour(State S) = 0;
+  virtual State neighbour(State &S) = 0;
 
   // Return the energy of S
-  virtual double E(State S) = 0;
+  virtual double cost(State &S) = 0;
 
   // Return the acceptance probability given the current state, new state,
   // and a temperature value.
-  // Mathemtically: Pr( SNew | S, Temperature)
-  virtual double P(State S, State SNew, double Temperature) = 0;
+  // Mathematically: Pr( SNew | S, Temperature)
+  virtual double probabilityOfNewState(State &S, State &SNew,
+                                       double Temperature) = 0;
 };
 
 class SimulatedAnnealingProtean
@@ -84,13 +85,14 @@ public:
   double temperature(int Iteration) override;
 
   // Use the PhaseOrderGeneratorBase to generate a random recipe.
-  State neighbour(State S) override;
+  State neighbour(State &S) override;
 
   // For now: Return a constant energy.
-  double E(State S) override;
+  double cost(State &S) override;
 
   // For now: Return 1 (i.e. always accept the new state).
-  double P(State S, State SNew, double Temperature) override;
+  double probabilityOfNewState(State &S, State &SNew,
+                               double Temperature) override;
 };
 
 #endif

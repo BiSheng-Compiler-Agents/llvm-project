@@ -21,6 +21,8 @@
 #define LLVM_TOOLS_OPT_NEWPMDRIVER_H
 
 #include "llvm/Support/CommandLine.h"
+#include <map>
+#include <string>
 
 namespace llvm {
 class StringRef;
@@ -49,6 +51,8 @@ enum CSPGOKind { NoCSPGO, CSInstrGen, CSInstrUse };
 } // namespace opt_tool
 
 void printPasses(raw_ostream &OS);
+
+std::unordered_map<std::string, std::string> createPassMap();
 
 /// Driver function to run the new pass manager over a module.
 ///

@@ -217,6 +217,7 @@
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Passes/TriggerCrashPasses.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Passes/PassMapBuilder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
@@ -3022,6 +3023,10 @@ void PassBuilder::printPassNames(raw_ostream &OS) {
 #include "llvm/Passes/MachinePassRegistry.def"
   };
   printPassNameList(StringTable(MachineFunctionAnalysisNames), OS);
+}
+
+std::unordered_map<std::string, std::string> PassBuilder::createPassMap() {
+  return initializePassMap();
 }
 
 void PassBuilder::registerParseTopLevelPipelineCallback(

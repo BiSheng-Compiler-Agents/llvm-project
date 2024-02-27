@@ -17,6 +17,7 @@
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/LoopPass.h"
+#include "llvm/Analysis/PhaseOrder.h"
 #include "llvm/Analysis/RegionPass.h"
 #include "llvm/Analysis/SimulatedAnnealing.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -62,6 +63,7 @@
 #include <memory>
 #include <filesystem>
 #include <optional>
+#include <string>
 
 using namespace llvm;
 using namespace opt_tool;
@@ -711,16 +713,17 @@ int main(int argc, char **argv) {
 
 
       SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(CoolingType,MaxIterations);
+      PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       SAProtean.run();
       if (SAProtean.getFinished()) {
         // TODO: Guard with debug messages later.
         LLVM_DEBUG(dbgs() << "Simulated Annealing finished running. ");
         LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
-                          << PhaseOrderGeneratorBase::RecipesToPasses(
-                                 SAProtean.getFinalState())
+                          << PhaseOrderGeneratorBase::recipesToPasses(
+                                 SAProtean.getFinalState(), PassMap)
                           << "\n");
         std::string RecipeStr =
-            PhaseOrderGeneratorBase::RecipesToString(SAProtean.getFinalState());
+            PhaseOrderGeneratorBase::recipesToString(SAProtean.getFinalState());
         std::error_code EC;
 
         // Find the best recipe and copy it to the appropriate file names.
@@ -761,7 +764,7 @@ int main(int argc, char **argv) {
         // TODO: Need the Simulated Annealing to keep track of already visited states thus we do
         // reuse the same recipe in previous iterations.
         std::string RecipeStr =
-            PhaseOrderGeneratorBase::RecipesToString(SAProtean.getCurState());
+            PhaseOrderGeneratorBase::recipesToString(SAProtean.getCurState());
 
         std::error_code EC;
         sys::fs::OpenFlags Flags =
@@ -786,8 +789,8 @@ int main(int argc, char **argv) {
           }
         }
 
-        Recipes =
-            PhaseOrderGeneratorBase::RecipesToPasses(SAProtean.getCurState());
+        Recipes = PhaseOrderGeneratorBase::recipesToPasses(
+            SAProtean.getCurState(), PassMap);
       }
       LLVM_DEBUG(dbgs() << "Running Recipe: " << Recipes << "\n");
       if (!Pipeline.empty())
