@@ -13,8 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/PhaseOrder.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include <random>
+#include <sstream>
+#include <unordered_map>
 
 #define REGISTER_RECIPE_TO_PASSES(RECIPE, ...)                                 \
   { PhaseOrderGeneratorBase::Recipe::RECIPE, #__VA_ARGS__ }
@@ -22,17 +25,17 @@
 // formatting issues.
 // TODO: Rightnow the __VA_ARGS__ has to be comma separated WITHOUT any spaces.
 // Find a way to get rid of all the spaces.
-std::map<PhaseOrderGeneratorBase::Recipe, std::string>
+std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
     PhaseOrderGeneratorBase::RecipeToPassOrders{
       REGISTER_RECIPE_TO_PASSES(A, loop-simplify,loop-unroll<O3;partial>,),
       REGISTER_RECIPE_TO_PASSES(B, inline,),
       REGISTER_RECIPE_TO_PASSES(C, argpromotion,),
-    };
+};
 #undef REGISTER_RECIPE_TO_PASSES
 
 #define REGISTER_RECIPE_TO_STRING(RECIPE)                                      \
   { PhaseOrderGeneratorBase::Recipe::RECIPE, #RECIPE }
-std::map<PhaseOrderGeneratorBase::Recipe, std::string>
+std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
     PhaseOrderGeneratorBase::RecipeToString{
         REGISTER_RECIPE_TO_STRING(A),
         REGISTER_RECIPE_TO_STRING(B),
@@ -40,22 +43,102 @@ std::map<PhaseOrderGeneratorBase::Recipe, std::string>
     };
 #undef REGISTER_RECIPE_TO_STRING
 
-std::string PhaseOrderGeneratorBase::RecipesToPasses(
-    PhaseOrderGeneratorBase::Recipes R) {
-  std::string Res;
-  for (auto r : R) {
-    Res += PhaseOrderGeneratorBase::RecipeToPassOrders[r];
-  }
-  // Get rid of last comma
-  size_t LastComma = Res.find_last_of(",");
-  return Res.substr(0, LastComma);
+int passTypeToInt(std::string PassType, PhaseOrderGeneratorBase::PMap &PassMap,
+                  int PreviousPassNum) {
+  if ((PassMap[PassType] == "module" ||
+       (PassType.find("function(") != std::string::npos &&
+        PreviousPassNum != 1) ||
+       PassType.find("cgscc(") != std::string::npos))
+    return 0;
+  if (PassMap[PassType] == "cgscc" ||
+      PassType.find("function(") != std::string::npos)
+    return 1;
+  if (PassMap[PassType] == "function" ||
+      PassType.find("loop(") != std::string::npos ||
+      PassType.find("loop-mssa(") != std::string::npos)
+    return 2;
+  if (PassMap[PassType] == "loop")
+    return 3;
+  return -1;
 }
 
-std::string PhaseOrderGeneratorBase::RecipesToString(
-    PhaseOrderGeneratorBase::Recipes R) {
+std::string intToPassType(int Type) {
+  if (Type == 0)
+    return "module";
+  if (Type == 1)
+    return "cgscc";
+  if (Type == 2)
+    return "function";
+  if (Type == 3)
+    return "loop";
+  llvm_unreachable("Not a valid pass type");
+  return "";
+}
+
+std::string PhaseOrderGeneratorBase::recipesToPasses(
+    PhaseOrderGeneratorBase::Recipes const &R, PMap &PassMap) {
   std::string Res;
-  for (auto r : R) {
-    Res += PhaseOrderGeneratorBase::RecipeToString[r];
+  std::vector<std::string> Passes;
+  int HighestScopeNum = 4;
+  // Generate vector Passes of all passes provided in sequence
+  for (auto Recipe : R) {
+    std::string PassWithCommas =
+        PhaseOrderGeneratorBase::RecipeToPassOrders[Recipe];
+    std::stringstream SS(PassWithCommas.substr(0, PassWithCommas.length() - 1));
+    // Create vector of passes
+    while (SS.good()) {
+      std::string SubStr;
+      getline(SS, SubStr, ',');
+      Passes.push_back(SubStr);
+    }
+  }
+  // Find the highest scope to promote to
+  for (std::string Pass : Passes) {
+    std::string Str = Pass.substr(0, Pass.find_last_of("<"));
+    int PassNum = passTypeToInt(Str, PassMap, 10);
+    if (PassNum != -1)
+      HighestScopeNum = std::min(HighestScopeNum, PassNum);
+    else
+      HighestScopeNum = 0;
+  }
+  // Loop through all scopes, starting from lowest, nesting outwards
+  for (int Scope = 3; Scope > HighestScopeNum; Scope--) {
+    std::vector<std::string> NewPasses;
+    int PreviousPassNum = 10;
+    for (std::string Pass : Passes) {
+      std::string Str = Pass.substr(0, Pass.find_last_of("<"));
+      int PassNum = passTypeToInt(Str, PassMap, PreviousPassNum);
+      // If the current pass is of the same scope as current scope, promote it
+      if (PassNum == Scope) {
+        // If current pass is same scope as previous pass, combine them
+        if (PassNum == PreviousPassNum) {
+          std::string PreviousPass = NewPasses.back();
+          NewPasses.pop_back();
+          std::string Combined =
+              PreviousPass.substr(0, PreviousPass.length() - 1);
+          Combined = Combined + "," + Pass + ")";
+          NewPasses.push_back(Combined);
+        } else {
+          std::string Scope = intToPassType(PassNum);
+          NewPasses.push_back(Scope + "(" + Pass + ")");
+        }
+      } else
+        NewPasses.push_back(Pass);
+      PreviousPassNum = PassNum;
+    }
+    Passes = NewPasses;
+  }
+  // Combine vector into string
+  for (auto Pass : Passes)
+    Res += Pass + ",";
+  return Res.substr(0, Res.find_last_of(","));
+}
+
+std::string PhaseOrderGeneratorBase::recipesToString(
+    PhaseOrderGeneratorBase::Recipes const &R) {
+  std::string Res;
+  for (auto Recipe : R) {
+    Res += PhaseOrderGeneratorBase::RecipeToString[Recipe];
   }
   return Res;
 }
@@ -98,8 +181,8 @@ PhaseOrderGeneratorBase::Recipes PhaseOrderGeneratorBase::generateRecipe() {
   return convert(Res);
 }
 
-PhaseOrderGeneratorBase::Recipes
-PhaseOrderGeneratorBase::generateRecipe(PhaseOrderGeneratorBase::Recipes R) {
+PhaseOrderGeneratorBase::Recipes PhaseOrderGeneratorBase::generateRecipe(
+    PhaseOrderGeneratorBase::Recipes const &R) {
   // For now just generate a random sequence.
   return generateRecipe();
 }

@@ -65,7 +65,7 @@ void SimulatedAnnealingProtean::run() {
       if (!WIFEXITED(Wstatus)) {
         LLVM_DEBUG(llvm::dbgs()
                    << "Recipe exited unexpected: "
-                   << PhaseOrderGeneratorBase::RecipesToString(SNew) << "\n");
+                   << PhaseOrderGeneratorBase::recipesToString(SNew) << "\n");
       } else {
         LLVM_DEBUG(llvm::dbgs()
                    << "Child exited with: " << WEXITSTATUS(Wstatus) << "\n\n");
@@ -75,17 +75,18 @@ void SimulatedAnnealingProtean::run() {
     }
 
     // Accept or reject the new state.
-    if (P(S, SNew, Temp) >= ((double)randInt(0, INT_MAX) / (double)INT_MAX)) {
+    if (probabilityOfNewState(S, SNew, Temp) >=
+        ((double)randInt(0, INT_MAX) / (double)INT_MAX)) {
       LLVM_DEBUG(llvm::dbgs() << "New state accepted\n");
       S = SNew;
     }
   }
-  setFinalState(getCurState());
+  setFinalState(S);
   setFinished(true);
 }
 
 SimulatedAnnealingProtean::State
-SimulatedAnnealingProtean::neighbour(SimulatedAnnealingProtean::State S) {
+SimulatedAnnealingProtean::neighbour(SimulatedAnnealingProtean::State &S) {
   return Generator->generateRecipe(S);
 }
 
@@ -101,16 +102,16 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
   return 0.0;
 }
 
-double SimulatedAnnealingProtean::E(SimulatedAnnealingProtean::State S) {
+double SimulatedAnnealingProtean::cost(SimulatedAnnealingProtean::State &S) {
   // perform IR analysis to determine cost of current state
 
   return randInt(0, 100);
 }
 
-double SimulatedAnnealingProtean::P(SimulatedAnnealingProtean::State S,
-                                    SimulatedAnnealingProtean::State SNew,
-                                    double Temperature) {
-  double Diff = E(SNew) - E(S);
+double SimulatedAnnealingProtean::probabilityOfNewState(
+    SimulatedAnnealingProtean::State &S, SimulatedAnnealingProtean::State &SNew,
+    double Temperature) {
+  double Diff = cost(SNew) - cost(S);
   // If new state is worse than old, use equation below to calculate probability
   // of accepting new state
   if (Diff >= 0)
