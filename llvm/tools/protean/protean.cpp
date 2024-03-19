@@ -291,13 +291,24 @@ static cl::list<std::string>
     PassPlugins("load-pass-plugin",
                 cl::desc("Load passes from plugin library"));
 
-static cl::opt<std::string>
-    CoolingType("cooling",
-                cl::desc("Choose cooling schedule"), cl::init("geometric"));
+static cl::opt<CoolingType> CoolingSchedule(
+    "cooling", cl::init(Geometric),
+    cl::desc("Choose Cooling Schedule for Simulated Annealing"),
+    cl::values(clEnumVal(Geometric, "Determine cost based on file size"),
+               clEnumVal(Linear, "Determine cost based on instruction count")));
 
-static cl::opt<unsigned>
-    MaxIterations("max-iterations",
-                cl::desc("Specify Maximum Iterations for Simulated Annealing"), cl::init(50));
+static cl::opt<unsigned> MaxIterations(
+    "max-iterations",
+    cl::desc("Specify Maximum Iterations for Simulated Annealing"),
+    cl::init(50));
+
+static cl::opt<IRCostFunction> CostType(
+    "cost-type", cl::init(FileSize),
+    cl::desc("Choose IR Cost Function used for Simulated Annealing"),
+    cl::values(clEnumVal(FileSize, "Determine cost based on file size"),
+               clEnumVal(InstCount,
+                         "Determine cost based on instruction count"),
+               clEnumVal(IRAnalysis, "Determine cost based on IR Analyzer")));
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
 //
@@ -710,9 +721,14 @@ int main(int argc, char **argv) {
     // here.
     if (UseProteanInitialPasses.getValue()) {
       std::string Recipes;
+      if (OutputFilename == "-") {
+        errs() << "Specify an output file with -o to activate Simulated "
+                  "Annealing\n";
+        return 1;
+      }
 
-
-      SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(CoolingType,MaxIterations);
+      SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
+          CoolingSchedule, MaxIterations, CostType, OutputFilename);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       SAProtean.run();
       if (SAProtean.getFinished()) {
