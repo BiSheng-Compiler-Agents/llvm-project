@@ -18,6 +18,11 @@
 
 #include "llvm/Analysis/PhaseOrder.h"
 #include <memory>
+#include <unordered_map>
+
+enum IRCostFunction { FileSize, InstCount, IRAnalysis };
+
+enum CoolingType { Geometric, Linear };
 
 // A base class for simulated annealing
 template <class State> class SimulatedAnnealingBase {
@@ -70,13 +75,17 @@ private:
   std::unique_ptr<PhaseOrderGeneratorBase> Generator;
 
 public:
-  std::string CoolingSchedule;
+  CoolingType CoolingSchedule;
+  IRCostFunction CostType;
+  std::string OutputFilename;
   double MaxTemperature;
   double MinTemperature;
   double CoolingRate;
   unsigned int MaxIterations;
-  SimulatedAnnealingProtean(std::string CoolingSchedule,
-                            unsigned int MaxIterations);
+  std::unordered_map<std::string, int> CostMap;
+  SimulatedAnnealingProtean(CoolingType CoolingSchedule,
+                            unsigned int MaxIterations, IRCostFunction CostType,
+                            std::string OutputFileName);
 
   using State = PhaseOrderGeneratorBase::Recipes;
   void run() override;
@@ -93,6 +102,18 @@ public:
   // For now: Return 1 (i.e. always accept the new state).
   double probabilityOfNewState(State &S, State &SNew,
                                double Temperature) override;
+
+  // Calculates cost based on instruction count
+  double instructionCountCost(SimulatedAnnealingProtean::State &S,
+                              std::string OutputFilename);
+
+  // Calculates cost using an IR Analyzer
+  double irAnalysisCost(SimulatedAnnealingProtean::State &S,
+                        std::string OutputFilename);
+
+  // Calculates cost based on file size
+  double fileSizeCost(SimulatedAnnealingProtean::State &S,
+                      std::string OutputFilename);
 };
 
 #endif
