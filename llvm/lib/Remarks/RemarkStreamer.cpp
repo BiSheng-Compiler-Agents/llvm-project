@@ -14,6 +14,10 @@
 #include "llvm/Support/CommandLine.h"
 #include <optional>
 
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/IR/DebugInfoMetadata.h"
+#endif
+
 using namespace llvm;
 using namespace llvm::remarks;
 

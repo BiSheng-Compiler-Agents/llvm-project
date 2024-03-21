@@ -1,0 +1,9 @@
+!AutoTuning {Args: [{UnrollCount: 0}], CodeRegionHash: 12835463591102937421,
+  CodeRegionType: loop, Function: test, Invocation: 0, Name: for.body,
+  Pass: loop-unroll}
+--- !AutoTuning {Args: [{VectorizationInterleave: 2}],
+  CodeRegionHash: 12835463591102937421, CodeRegionType: loop, Function: test,
+  Invocation: 0, Name: for.body, Pass: loop-vectorize}
+--- !AutoTuning {Args: [{UnrollCount: 0}], CodeRegionHash: 8430337282115614432,
+  CodeRegionType: loop, Function: test, Invocation: 1, Name: vector.body,
+  Pass: loop-unroll}

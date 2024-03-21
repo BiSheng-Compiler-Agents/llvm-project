@@ -569,6 +569,12 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler,
   for (MachineFunction::iterator MBB = MF->begin(), MBBEnd = MF->end();
        MBB != MBBEnd; ++MBB) {
 
+#if defined(ENABLE_AUTOTUNER)
+    // before visiting this MBB
+    // if AutoTuning is enabled, initialize this MBB for auto-tuning
+    autotuning::Engine.initContainer(&*MBB, DEBUG_TYPE);
+#endif
+
     Scheduler.startBlock(&*MBB);
 
 #ifndef NDEBUG
@@ -3243,6 +3249,44 @@ void GenericScheduler::initPolicy(MachineBasicBlock::iterator Begin,
     RegionPolicy.ShouldTrackPressure = false;
     RegionPolicy.ShouldTrackLaneMasks = false;
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - Look up for MMB level scheduling direction if AutoTuning is
+  // enabled
+  if (autotuning::Engine.isEnabled()) {
+    MachineBasicBlock &MBB = *Begin->getParent();
+
+    bool NewForceBottomUp = false;
+    // Look up from xml file, and overwrite values
+    bool IsForceBottomUpSet =
+        MBB.lookUpParams<bool>("ForceBottomUp", NewForceBottomUp);
+
+    bool NewForceForceTopDown = false;
+    bool IsForceTopDownSet =
+        MBB.lookUpParams<bool>("ForceTopDown", NewForceForceTopDown);
+
+    assert((!NewForceBottomUp || !NewForceForceTopDown) &&
+           "BottomUp and TopDown cannot both set to true");
+
+    if (IsForceBottomUpSet) {
+      RegionPolicy.OnlyBottomUp = NewForceBottomUp;
+      if (RegionPolicy.OnlyBottomUp) {
+        RegionPolicy.OnlyTopDown = false;
+      }
+    }
+
+    if (IsForceTopDownSet) {
+      RegionPolicy.OnlyTopDown = NewForceForceTopDown;
+      if (RegionPolicy.OnlyTopDown) {
+        RegionPolicy.OnlyBottomUp = false;
+      }
+    }
+
+    if (IsForceBottomUpSet || IsForceTopDownSet) {
+      return;
+    }
+  }
+#endif
 
   // Check -misched-topdown/bottomup can force or unforce scheduling direction.
   // e.g. -misched-bottomup=false allows scheduling in both directions.

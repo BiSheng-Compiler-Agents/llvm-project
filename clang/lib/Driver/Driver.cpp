@@ -104,6 +104,14 @@
 #if LLVM_ON_UNIX
 #include <unistd.h> // getpid
 #endif
+#if defined(ENABLE_AUTOTUNER)
+// Constant definition for environment variable to enable AutoTuner and set
+// the mode to generate opportunities or apply configurations.
+const std::string AutoTuneModeStr = "AUTOTUNE_MODE";
+// Constant definition for environment variable to specify the project base
+// directory.
+const std::string AutoTunePrjDirStr = "AUTOTUNE_PROJECT_DIR";
+#endif
 
 using namespace clang::driver;
 using namespace clang;
@@ -200,6 +208,9 @@ Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
       SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone),
       Offload(OffloadHostDevice), CXX20HeaderType(HeaderMode_None),
       ModulesModeCXX20(false), LTOMode(LTOK_None),
+#if defined(ENABLE_AUTOTUNER)
+      AutoTuneMode(AutoTuneNone),
+#endif
       ClangExecutable(ClangExecutable), SysRoot(DEFAULT_SYSROOT),
       DriverTitle(Title), CCCPrintBindings(false), CCPrintOptions(false),
       CCLogDiagnostics(false), CCGenDiagnostics(false),
@@ -1375,6 +1386,77 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   }
 
   setLTOMode(Args);
+
+#if defined(ENABLE_AUTOTUNER)
+  // Process -fautotune and -fautotune-generate flags.
+  bool IsAutoTuneGenerate = Args.hasArg(options::OPT_fautotune_generate,
+                                        options::OPT_fautotune_generate_EQ);
+  bool IsAutoTune =
+      Args.hasArg(options::OPT_fautotune, options::OPT_fautotune_EQ);
+  // Check if the environment variable AUTOTUNE_MODE is used instead of
+  // -fautotune-generate/-fautotune.
+  if (!IsAutoTuneGenerate && !IsAutoTune) {
+    if (std::optional<std::string> MaybeMode =
+            llvm::sys::Process::GetEnv(AutoTuneModeStr)) {
+      StringRef Mode = *MaybeMode;
+      StringRef OrgMode = *MaybeMode;
+      if (Mode.consume_front("-fautotune-generate")) {
+        if (Mode.empty() || Mode.startswith("="))
+          IsAutoTuneGenerate = true;
+        else
+          Diags.Report(diag::err_drv_autotune_incorrect_env) << OrgMode;
+      } else if (Mode.consume_front("-fautotune")) {
+        if (Mode.empty() || Mode.startswith("="))
+          IsAutoTune = true;
+        else
+          Diags.Report(diag::err_drv_autotune_incorrect_env) << OrgMode;
+      } else {
+        Diags.Report(diag::err_drv_autotune_incorrect_env) << OrgMode;
+      }
+
+      if (Mode.consume_front("=")) {
+        if (Mode.empty())
+          Diags.Report(diag::err_drv_autotune_no_filter_types)
+              << (IsAutoTuneGenerate ? "-fautotune-generate=" : "-fautotune=");
+
+        AutoTuneOptions = Mode.str();
+      }
+    }
+  }
+
+  IsMLTuningEnabled = Args.hasArg(options::OPT_fautotune_rank);
+
+  if (IsAutoTuneGenerate && IsAutoTune)
+    Diags.Report(diag::err_drv_argument_not_allowed_with)
+        << "-fautotune"
+        << "-fautotune-generate";
+
+  if (IsMLTuningEnabled && !(IsAutoTuneGenerate || IsAutoTune))
+    Diags.Report(diag::err_drv_argument_only_allowed_with)
+        << "-fautotune-rank"
+        << "-fautotune or -fautotune-generate";
+
+  if (IsAutoTuneGenerate || IsAutoTune) {
+    // Check if the environment variable AUTOTUNE_DATADIR is set.
+    if (std::optional<std::string> MaybePath =
+            llvm::sys::Process::GetEnv("AUTOTUNE_DATADIR"))
+      AutoTuneDirDataPath = *MaybePath;
+    else
+      AutoTuneDirDataPath = "autotune_datadir";
+
+    // Check if the environment variable AUTOTUNE_PROJECT_DIR is set.
+    if (std::optional<std::string> MaybeProjectDIR =
+            llvm::sys::Process::GetEnv(AutoTunePrjDirStr))
+      AutoTuneProjectDir = *MaybeProjectDIR;
+    else
+      AutoTuneProjectDir = "";
+
+    if (IsAutoTuneGenerate)
+      AutoTuneMode = AutoTuneGenerate;
+    if (IsAutoTune)
+      AutoTuneMode = AutoTuneNext;
+  }
+#endif
 
   // Process -fembed-bitcode= flags.
   if (Arg *A = Args.getLastArg(options::OPT_fembed_bitcode_EQ)) {

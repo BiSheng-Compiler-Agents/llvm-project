@@ -91,6 +91,12 @@ protected:
   Expected<RemarkLocation> parseDebugLoc(yaml::KeyValueNode &Node);
   /// Parse an argument.
   Expected<Argument> parseArg(yaml::Node &Node);
+#if defined(ENABLE_AUTOTUNER)
+  /// parse a vector of strings.
+  Expected<std::vector<StringRef>> parseStrVector(yaml::KeyValueNode &Node);
+  /// Parse one value to an unsigned long long.
+  Expected<uint64_t> parseUnsignedLL(yaml::KeyValueNode &Node);
+#endif
 };
 
 /// YAML with a string table to Remark parser.

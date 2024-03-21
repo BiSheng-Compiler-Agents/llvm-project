@@ -108,7 +108,11 @@ bool computeUnrollCount(Loop *L, const TargetTransformInfo &TTI,
                         unsigned TripMultiple, unsigned LoopSize,
                         TargetTransformInfo::UnrollingPreferences &UP,
                         TargetTransformInfo::PeelingPreferences &PP,
+#if defined(ENABLE_AUTOTUNER)
+                        bool &UseUpperBound, unsigned int Invocation = 0);
+#else
                         bool &UseUpperBound);
+#endif
 
 void simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
                              ScalarEvolution *SE, DominatorTree *DT,

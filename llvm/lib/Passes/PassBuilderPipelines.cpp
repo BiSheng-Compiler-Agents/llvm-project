@@ -133,6 +133,11 @@
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 #include "llvm/Transforms/Vectorize/VectorCombine.h"
 
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#include "llvm/Transforms/Scalar/AutoTuningCompile.h"
+#endif
+
 using namespace llvm;
 
 static cl::opt<InliningAdvisorMode> UseInlineAdvisor(
@@ -288,6 +293,10 @@ PipelineTuningOptions::PipelineTuningOptions() {
   InlinerThreshold = -1;
   EagerlyInvalidateAnalyses = EnableEagerlyInvalidateAnalyses;
 }
+
+#if defined(ENABLE_AUTOTUNER)
+extern cl::opt<AutoTuningCompileOpt> AutoTuningCompileMode;
+#endif
 
 namespace llvm {
 extern cl::opt<unsigned> MaxDevirtIterations;
@@ -452,9 +461,17 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   // attention to it.
   if (Phase != ThinOrFullLTOPhase::ThinLTOPreLink || !PGOOpt ||
       PGOOpt->Action != PGOOptions::SampleUse)
+#if defined(ENABLE_AUTOTUNER)
+  {
+    if (AutoTuningCompileMode)
+      LPM2.addPass(AutoTuningCompileLoopPass(autotuning::CompileOptionUnroll));
+#endif
     LPM2.addPass(LoopFullUnrollPass(Level.getSpeedupLevel(),
                                     /* OnlyWhenForced= */ !PTO.LoopUnrolling,
                                     PTO.ForgetAllSCEVInLoopUnroll));
+#if defined(ENABLE_AUTOTUNER)
+  }
+#endif
 
   invokeLoopOptimizerEndEPCallbacks(LPM2, Level);
 
@@ -631,9 +648,17 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   // attention to it.
   if (Phase != ThinOrFullLTOPhase::ThinLTOPreLink || !PGOOpt ||
       PGOOpt->Action != PGOOptions::SampleUse)
+#if defined(ENABLE_AUTOTUNER)
+  {
+    if (AutoTuningCompileMode)
+      LPM2.addPass(AutoTuningCompileLoopPass(autotuning::CompileOptionUnroll));
+#endif
     LPM2.addPass(LoopFullUnrollPass(Level.getSpeedupLevel(),
                                     /* OnlyWhenForced= */ !PTO.LoopUnrolling,
                                     PTO.ForgetAllSCEVInLoopUnroll));
+#if defined(ENABLE_AUTOTUNER)
+  }
+#endif
 
   invokeLoopOptimizerEndEPCallbacks(LPM2, Level);
 
@@ -1110,6 +1135,11 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   if (EnableSyntheticCounts && !PGOOpt)
     MPM.addPass(SyntheticCountsPropagation());
 
+#if defined(ENABLE_AUTOTUNER)
+  if (AutoTuningCompileMode)
+    MPM.addPass(AutoTuningCompileModulePass(autotuning::CompileOptionInline));
+#endif
+
   if (EnableModuleInliner)
     MPM.addPass(buildModuleInlinerPipeline(Level, Phase));
   else
@@ -1131,6 +1161,12 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
 /// TODO: Should LTO cause any differences to this set of passes?
 void PassBuilder::addVectorPasses(OptimizationLevel Level,
                                   FunctionPassManager &FPM, bool IsFullLTO) {
+#if defined(ENABLE_AUTOTUNER)
+  if (AutoTuningCompileMode && !IsFullLTO)
+    FPM.addPass(
+        AutoTuningCompileFunctionPass(autotuning::CompileOptionVectorize));
+#endif
+
   FPM.addPass(LoopVectorizePass(
       LoopVectorizeOptions(!PTO.LoopInterleaving, !PTO.LoopVectorization)));
 
@@ -1444,6 +1480,10 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
     return buildO0DefaultPipeline(Level, LTOPreLink);
 
   ModulePassManager MPM;
+#if defined(ENABLE_AUTOTUNER)
+  if (AutoTuningCompileMode)
+    MPM.addPass(AutoTuningCompileModulePass(autotuning::CompileOptionStart));
+#endif
 
   // Convert @llvm.global.annotations to !annotation metadata.
   MPM.addPass(Annotation2MetadataPass());
@@ -1475,6 +1515,12 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
 
   if (LTOPreLink)
     addRequiredLTOPreLinkPasses(MPM);
+
+#if defined(ENABLE_AUTOTUNER)
+  if (AutoTuningCompileMode)
+    MPM.addPass(AutoTuningCompileModulePass(autotuning::CompileOptionEnd));
+#endif
+
   return MPM;
 }
 

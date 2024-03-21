@@ -2362,6 +2362,119 @@ void tools::addMachineOutlinerArgs(const Driver &D,
   }
 }
 
+#if defined(ENABLE_AUTOTUNER)
+static bool isAcceptableThinLTOCodeRegion(StringRef CR) {
+  if ((CR.equals("CallSite") || CR.equals("Loop") || CR.equals("Function") ||
+       CR.equals("MachineBasicBlock")))
+    return false;
+  return true;
+}
+
+static bool processOpportunitiesOptions(StringRef CR, bool IsThinLTO,
+                                        std::string &CodeRegionsFilterStr) {
+  // Check if the argument has a valid value.
+  if (!(CR.equals("Other") || CR.equals("LLVMParam") || CR.equals("CallSite") ||
+        CR.equals("Function") || CR.equals("Loop") ||
+        CR.equals("MachineBasicBlock") || CR.equals("Switch") ||
+        CR.equals("ProgramParam")))
+    return false;
+
+  // Disable fine grain tuning for thin LTO during link time optimization.
+  if (IsThinLTO && !isAcceptableThinLTOCodeRegion(CR)) {
+    llvm::errs()
+        << "error: fine-grained autotuning not supported in ThinLTO mode\n";
+    return false;
+  }
+
+  if (!CodeRegionsFilterStr.empty())
+    CodeRegionsFilterStr += ',';
+  CodeRegionsFilterStr += CR;
+  return true;
+}
+
+// Add AutoTuner options for generating tuning opporutnities.
+// IsThinLTO will only be true during link time optimization for -flto=thin.
+void tools::AddAutoTuningOpportunities(const ArgList &Args, const Driver &D,
+                                       ArgStringList &CmdArgs, bool IsThinLTO) {
+  // Dump CodeRegions into opportunity files.
+  CmdArgs.push_back("-mllvm");
+  SmallString<128> OppPath = StringRef(D.AutoTuneDirDataPath);
+  llvm::sys::path::append(OppPath, "opp");
+  StringRef RawTypeFilterStr = D.AutoTuneOptions;
+  CmdArgs.push_back(Args.MakeArgString(Twine("-auto-tuning-opp=") + OppPath));
+  if (D.IsMLTuningEnabled) {
+    // Baseline config is -1
+    CmdArgs.push_back("-mllvm");
+    CmdArgs.push_back(Args.MakeArgString(Twine("-auto-tuning-config-id=-1")));
+  }
+  // Filter CodeRegions by type.
+  std::string CodeRegionsFilterStr;
+  if (Arg *A = Args.getLastArg(options::OPT_fautotune_generate_EQ)) {
+    for (StringRef CR : A->getValues()) {
+      if (!processOpportunitiesOptions(CR, IsThinLTO, CodeRegionsFilterStr))
+        D.Diag(diag::err_drv_unsupported_option_argument)
+            << A->getOption().getName() << CR;
+    }
+  } else if (!RawTypeFilterStr.empty()) {
+    SmallVector<StringRef, 8> TypeFilters;
+    RawTypeFilterStr.split(TypeFilters, ',');
+    for (StringRef CR : TypeFilters) {
+      if (!processOpportunitiesOptions(CR, IsThinLTO, CodeRegionsFilterStr))
+        D.Diag(diag::err_drv_unsupported_option_argument)
+            << "fautotune-generate" << CR;
+    }
+  } else {
+    if (IsThinLTO)
+      D.Diag(diag::err_drv_autotune_generic)
+          << "AutoTuner: no valid code region type specified for ThinLTO mode";
+    // Otherwise by default, dump CodeRegions of Function and Loop type.
+    CodeRegionsFilterStr = "CallSite,Function,Loop";
+  }
+  CmdArgs.push_back("-mllvm");
+  CmdArgs.push_back(
+      Args.MakeArgString("-auto-tuning-type-filter=" + CodeRegionsFilterStr));
+}
+
+static bool processInputOptions(StringRef Options, SmallString<128> &Path,
+                                const ArgList &Args, const Driver &D,
+                                llvm::opt::ArgStringList &CmdArgs) {
+  unsigned Value = 0;
+  // Check if the argument is an integer type.
+  if (Options.getAsInteger(10, Value))
+    return false;
+  llvm::sys::path::append(Path, "config-" + Twine(Value) + ".yaml");
+  if (D.IsMLTuningEnabled) {
+    CmdArgs.push_back("-mllvm");
+    CmdArgs.push_back(
+        Args.MakeArgString(Twine("-auto-tuning-config-id=" + Twine(Value))));
+  }
+  return true;
+}
+
+void tools::AddAutoTuningInput(const ArgList &Args, const Driver &D,
+                               llvm::opt::ArgStringList &CmdArgs) {
+  SmallString<128> InputPath = StringRef(D.AutoTuneDirDataPath);
+  StringRef RawOptionsStr = D.AutoTuneOptions;
+
+  if (Arg *A = Args.getLastArg(options::OPT_fautotune_EQ)) {
+    if (!processInputOptions(StringRef(A->getValue()), InputPath, Args, D,
+                             CmdArgs))
+      D.Diag(diag::err_drv_invalid_int_value)
+          << A->getAsString(Args) << A->getValue();
+  } else if (!RawOptionsStr.empty()) {
+    if (!processInputOptions(RawOptionsStr, InputPath, Args, D, CmdArgs))
+      D.Diag(diag::err_drv_invalid_int_value)
+          << "-fautotune=" + RawOptionsStr.str() << RawOptionsStr;
+  } else {
+    llvm::sys::path::append(InputPath, "config.yaml");
+  }
+  CmdArgs.push_back("-mllvm");
+  CmdArgs.push_back(
+      Args.MakeArgString(Twine("-auto-tuning-input=") + InputPath));
+  setenv("AUTOTUNE_INPUT", Args.MakeArgString(InputPath), 1);
+}
+#endif
+
 void tools::addOpenMPDeviceRTL(const Driver &D,
                                const llvm::opt::ArgList &DriverArgs,
                                llvm::opt::ArgStringList &CC1Args,

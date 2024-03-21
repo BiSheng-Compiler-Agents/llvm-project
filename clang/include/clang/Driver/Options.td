@@ -1785,6 +1785,19 @@ def fmemory_profile_use_EQ : Joined<["-"], "fmemory-profile-use=">,
     Group<f_Group>, Flags<[CC1Option, CoreOption]>, MetaVarName<"<pathname>">,
     HelpText<"Use memory profile for profile-guided memory optimization">,
     MarshallingInfoString<CodeGenOpts<"MemoryProfileUsePath">>;
+#ifdef ENABLE_AUTOTUNER
+// Auto-tuning flags.
+def fautotune : Flag<["-"], "fautotune">, Group<f_Group>,
+  HelpText<"Auto-tune with the compiler configuration under 'autotune_datadir' (overridden by AUTOTUNE_DATADIR env var)">;
+def fautotune_EQ : Joined<["-"], "fautotune=">, Group<f_Group>,
+  HelpText<"Auto-tune with the compiler configuration of the specified id under 'autotune_datadir' (overridden by AUTOTUNE_DATADIR env var)">;
+def fautotune_generate : Flag<["-"], "fautotune-generate">, Group<f_Group>,
+  HelpText<"Generate initial compiler configuration for Function/Loop code regions under 'autotune_datadir' (overridden by AUTOTUNE_DATADIR env var)">;
+def fautotune_generate_EQ : CommaJoined<["-"], "fautotune-generate=">, Group<f_Group>,
+  HelpText<"Generate initial compiler configuration for the given comma-separated list of code regions under 'autotune_datadir' (overridden by AUTOTUNE_DATADIR env var)">, Values<"Other,Function,Loop,MachineBasicBlock">;
+def fautotune_rank : Flag<["-"], "fautotune-rank">, Group<f_Group>,
+  HelpText<"Generate files necessary for ML-guided ranking">;
+#endif
 
 // Begin sanitizer flags. These should all be core options exposed in all driver
 // modes.

@@ -491,6 +491,11 @@ char &llvm::LCSSAID = LCSSAWrapperPass::ID;
 
 /// Transform \p F into loop-closed SSA form.
 bool LCSSAWrapperPass::runOnFunction(Function &F) {
+#if defined(ENABLE_AUTOTUNER)
+  if (skipFunction(F))
+    return false;
+#endif
+
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();

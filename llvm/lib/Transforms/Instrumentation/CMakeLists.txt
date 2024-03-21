@@ -30,6 +30,7 @@ add_llvm_component_library(LLVMInstrumentation
 
   LINK_COMPONENTS
   Analysis
+  AutoTuner
   Core
   Demangle
   MC

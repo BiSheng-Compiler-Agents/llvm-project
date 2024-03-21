@@ -17,9 +17,22 @@
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Path.h"
 #include <optional>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/Support/CommandLine.h"
+#endif
 
 using namespace llvm;
 using namespace llvm::remarks;
+
+#if defined(ENABLE_AUTOTUNER)
+// Creating code regions without meta data (e.g. debug Location, Function Name,
+// etc.).
+// This flag is added here instead of 'lib/AutoTuner/AutoTuning.cpp' to avoid
+// making LLVMRemarks dependent on LLVMCore.
+cl::opt<bool> OmitAutotuningMetadata(
+    "auto-tuning-omit-metadata", cl::Hidden, cl::init(false),
+    cl::desc("Include only code region hashes and types in opportunity files"));
+#endif
 
 char YAMLParseError::ID = 0;
 
@@ -235,6 +248,23 @@ YAMLRemarkParser::parseRemark(yaml::Document &RemarkEntry) {
         TheRemark.FunctionName = *MaybeStr;
       else
         return MaybeStr.takeError();
+#if defined(ENABLE_AUTOTUNER)
+    } else if (KeyName == "CodeRegionType") {
+      if (Expected<StringRef> MaybeStr = parseStr(RemarkField))
+        TheRemark.CodeRegionType = *MaybeStr;
+      else
+        return MaybeStr.takeError();
+    } else if (KeyName == "CodeRegionHash") {
+      if (Expected<uint64_t> MaybeULL = parseUnsignedLL(RemarkField))
+        TheRemark.CodeRegionHash = *MaybeULL;
+      else
+        return MaybeULL.takeError();
+    } else if (KeyName == "Invocation") {
+      if (Expected<unsigned int> MaybeULL = parseUnsignedLL(RemarkField))
+        TheRemark.Invocation = *MaybeULL;
+      else
+        return MaybeULL.takeError();
+#endif
     } else if (KeyName == "Hotness") {
       if (Expected<unsigned> MaybeU = parseUnsigned(RemarkField))
         TheRemark.Hotness = *MaybeU;
@@ -261,11 +291,35 @@ YAMLRemarkParser::parseRemark(yaml::Document &RemarkEntry) {
     }
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  // Check if any of the mandatory fields are missing.
+  if (TheRemark.RemarkType == Type::AutoTuning) {
+    // We expect type, and pass to be present at least.
+    if (!TheRemark.CodeRegionType || TheRemark.PassName.empty())
+      return error("CodeRegionHash, CodeRegionType, or Pass missing.",
+                   *RemarkEntry.getRoot());
+
+    // Sanity check for the correct command line option.
+    if (!OmitAutotuningMetadata && TheRemark.RemarkName.empty())
+      return error("Remark Name expected; enable -autotuning-omit-metadata.",
+                   *RemarkEntry.getRoot());
+
+    if (!OmitAutotuningMetadata && TheRemark.FunctionName.empty())
+      return error(
+          "Remark Function Name expected; enable -autotuning-omit-metadata.",
+          *RemarkEntry.getRoot());
+  } else if (TheRemark.RemarkType == Type::Unknown ||
+             TheRemark.PassName.empty() || TheRemark.RemarkName.empty() ||
+             TheRemark.FunctionName.empty())
+    return error("Type, Pass, Name or Function missing.",
+                 *RemarkEntry.getRoot());
+#else
   // Check if any of the mandatory fields are missing.
   if (TheRemark.RemarkType == Type::Unknown || TheRemark.PassName.empty() ||
       TheRemark.RemarkName.empty() || TheRemark.FunctionName.empty())
     return error("Type, Pass, Name or Function missing.",
                  *RemarkEntry.getRoot());
+#endif
 
   return std::move(Result);
 }
@@ -277,6 +331,9 @@ Expected<Type> YAMLRemarkParser::parseType(yaml::MappingNode &Node) {
                   .Case("!Analysis", remarks::Type::Analysis)
                   .Case("!AnalysisFPCommute", remarks::Type::AnalysisFPCommute)
                   .Case("!AnalysisAliasing", remarks::Type::AnalysisAliasing)
+#if defined(ENABLE_AUTOTUNER)
+                  .Case("!AutoTuning", remarks::Type::AutoTuning)
+#endif
                   .Case("!Failure", remarks::Type::Failure)
                   .Default(remarks::Type::Unknown);
   if (Type == remarks::Type::Unknown)
@@ -313,6 +370,31 @@ Expected<StringRef> YAMLRemarkParser::parseStr(yaml::KeyValueNode &Node) {
   return Result;
 }
 
+#if defined(ENABLE_AUTOTUNER)
+Expected<std::vector<StringRef>>
+YAMLRemarkParser::parseStrVector(yaml::KeyValueNode &Node) {
+  std::vector<StringRef> Result;
+  auto *SequenceNode = dyn_cast<yaml::SequenceNode>(Node.getValue());
+  if (!SequenceNode)
+    return error("expected a value of sequence type.", Node);
+
+  for (yaml::Node &Element : *SequenceNode) {
+    auto *ScalarNode = dyn_cast<yaml::ScalarNode>(&Element);
+    if (!ScalarNode)
+      return error("expected a value of scalar type.", Element);
+    else {
+      StringRef Str = ScalarNode->getRawValue();
+      if (Str.front() == '\'')
+        Str = Str.drop_front();
+      if (Str.back() == '\'')
+        Str = Str.drop_back();
+      Result.push_back(Str);
+    }
+  }
+  return Result;
+}
+#endif
+
 Expected<unsigned> YAMLRemarkParser::parseUnsigned(yaml::KeyValueNode &Node) {
   SmallVector<char, 4> Tmp;
   auto *Value = dyn_cast<yaml::ScalarNode>(Node.getValue());
@@ -323,6 +405,19 @@ Expected<unsigned> YAMLRemarkParser::parseUnsigned(yaml::KeyValueNode &Node) {
     return error("expected a value of integer type.", *Value);
   return UnsignedValue;
 }
+
+#if defined(ENABLE_AUTOTUNER)
+Expected<uint64_t> YAMLRemarkParser::parseUnsignedLL(yaml::KeyValueNode &Node) {
+  SmallVector<char, 4> Tmp;
+  if (auto *Value = dyn_cast<yaml::ScalarNode>(Node.getValue())) {
+    uint64_t UnsignedValue = 0;
+    if (Value->getValue(Tmp).getAsInteger(10, UnsignedValue))
+      return error("expected a value of integer type.", *Value);
+    return UnsignedValue;
+  }
+  return error("expected a value of scalar type.", Node);
+}
+#endif
 
 Expected<RemarkLocation>
 YAMLRemarkParser::parseDebugLoc(yaml::KeyValueNode &Node) {
@@ -374,6 +469,9 @@ Expected<Argument> YAMLRemarkParser::parseArg(yaml::Node &Node) {
 
   std::optional<StringRef> KeyStr;
   std::optional<StringRef> ValueStr;
+#if defined(ENABLE_AUTOTUNER)
+  std::optional<std::vector<StringRef>> ValueStrVector;
+#endif
   std::optional<RemarkLocation> Loc;
 
   for (yaml::KeyValueNode &ArgEntry : *ArgMap) {
@@ -400,11 +498,27 @@ Expected<Argument> YAMLRemarkParser::parseArg(yaml::Node &Node) {
     if (ValueStr)
       return error("only one string entry is allowed per argument.", ArgEntry);
 
+#if defined(ENABLE_AUTOTUNER)
+    // Try to parse the value to a string vector.
+    if (Expected<std::vector<StringRef>> MaybeStrVector =
+            parseStrVector(ArgEntry)) {
+      ValueStrVector = *MaybeStrVector;
+      ValueStr = "";
+    } else {
+      consumeError(MaybeStrVector.takeError());
+      // Try to parse the value.
+      if (Expected<StringRef> MaybeStr = parseStr(ArgEntry))
+        ValueStr = *MaybeStr;
+      else
+        return MaybeStr.takeError();
+    }
+#else
     // Try to parse the value.
     if (Expected<StringRef> MaybeStr = parseStr(ArgEntry))
       ValueStr = *MaybeStr;
     else
       return MaybeStr.takeError();
+#endif
 
     // Keep the key from the string.
     KeyStr = KeyName;
@@ -412,10 +526,18 @@ Expected<Argument> YAMLRemarkParser::parseArg(yaml::Node &Node) {
 
   if (!KeyStr)
     return error("argument key is missing.", *ArgMap);
+#if defined(ENABLE_AUTOTUNER)
+  if (!ValueStr && !ValueStrVector)
+#else
   if (!ValueStr)
+#endif
     return error("argument value is missing.", *ArgMap);
 
+#if defined(ENABLE_AUTOTUNER)
+  return Argument{*KeyStr, *ValueStr, ValueStrVector, Loc};
+#else
   return Argument{*KeyStr, *ValueStr, Loc};
+#endif
 }
 
 Expected<std::unique_ptr<Remark>> YAMLRemarkParser::next() {

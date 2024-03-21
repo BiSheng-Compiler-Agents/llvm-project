@@ -27,6 +27,9 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 namespace llvm {
 
@@ -91,9 +94,19 @@ public:
   void deleteNode(MachineInstr *MI);
 };
 
+#if defined(ENABLE_AUTOTUNER)
+class MachineBasicBlock
+    : public ilist_node_with_parent<MachineBasicBlock, MachineFunction>,
+      public autotuning::Container {
+#else
 class MachineBasicBlock
     : public ilist_node_with_parent<MachineBasicBlock, MachineFunction> {
+#endif
 public:
+#if defined(ENABLE_AUTOTUNER)
+  void initCodeRegion() override;
+  uint64_t computeStructuralHash() override;
+#endif
   /// Pair of physical register and lane mask.
   /// This is not simply a std::pair typedef because the members should be named
   /// clearly as they both have an integer type.

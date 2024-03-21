@@ -38,6 +38,9 @@
 #include <optional>
 #include <string>
 #include <vector>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 namespace llvm {
 

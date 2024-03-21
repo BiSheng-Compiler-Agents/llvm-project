@@ -88,6 +88,10 @@ using namespace llvm;
   llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
 #include "llvm/Support/Extension.def"
 
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/Analysis/AutotuningDump.h"
+#endif
+
 namespace llvm {
 extern cl::opt<bool> DebugInfoCorrelate;
 
@@ -1015,6 +1019,27 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
           });
     }
 
+#if defined(ENABLE_AUTOTUNER)
+    bool Changed = false;
+    // If autotuning is enabled (for applying configuration), use AutoTuner
+    // generated pass ordering instead of passes in compilation pipeline. Passes
+    // before and after the compilation pipeline will be intact.
+    if (autotuning::Engine.isEnabled()) {
+      std::vector<std::string> PassesList;
+      Changed = autotuning::Engine.lookUpGlobalParams("OptPass", PassesList);
+      if (Changed && PassesList.size()) {
+        std::string PassPipeline = "";
+        for (auto PassName : PassesList)
+          PassPipeline.append(PassName + ",");
+        PassPipeline.pop_back();
+
+        if (auto Err = PB.parsePassPipeline(MPM, PassPipeline))
+          errs() << "AutoTuner: cannot add pass:" << toString(std::move(Err))
+                 << "\n";
+      }
+    }
+    if (!Changed) {
+#endif
     if (IsThinLTO || (IsLTO && CodeGenOpts.UnifiedLTO)) {
       MPM = PB.buildThinLTOPreLinkDefaultPipeline(Level);
     } else if (IsLTO) {
@@ -1022,6 +1047,9 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     } else {
       MPM = PB.buildPerModuleDefaultPipeline(Level);
     }
+#if defined(ENABLE_AUTOTUNER)
+    }
+#endif
   }
 
   // Add a verifier pass if requested. We don't have to do this if the action
@@ -1072,6 +1100,12 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     }
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  // Please ensure this pass is added after all optimization passes.
+  if (autotuning::Engine.isEnabled())
+    MPM.addPass(RequireAnalysisPass<AutotuningDumpAnalysis, llvm::Module>());
+#endif
+
   // Now that we have all of the passes ready, run them.
   {
     PrettyStackTraceString CrashInfo("Optimizer");
@@ -1119,6 +1153,22 @@ void EmitAssemblyHelper::RunCodegenPipeline(
 void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
                                       std::unique_ptr<raw_pwrite_stream> OS) {
   TimeRegion Region(CodeGenOpts.TimePasses ? &CodeGenerationTime : nullptr);
+
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - auto-tuning initialization for this module.
+  // Initialize it before parsing command-line options because we want to
+  // overwrite the llvm options using the config file.
+  if (Error E = autotuning::Engine.init(TheModule->getModuleIdentifier())) {
+    Diags.Report(diag::err_auto_tuning_error_reading) << toString(std::move(E));
+    return;
+  }
+  if (autotuning::Engine.isEnabled() && autotuning::Engine.isParseInput() &&
+      (autotuning::Engine.LLVMParams.size() ||
+       autotuning::Engine.ProgramParams.size()))
+    llvm::cl::ParseAutoTunerOptions(autotuning::Engine.LLVMParams,
+                                    autotuning::Engine.ProgramParams);
+#endif
+
   setCommandLineOpts(CodeGenOpts);
 
   bool RequiresCodeGen = actionRequiresCodeGen(Action);
@@ -1135,6 +1185,14 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   std::unique_ptr<llvm::ToolOutputFile> ThinLinkOS, DwoOS;
   RunOptimizationPipeline(Action, OS, ThinLinkOS);
   RunCodegenPipeline(Action, OS, DwoOS);
+
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - auto-tuning finalization for this module
+  if (Error E = autotuning::Engine.finalize()) {
+    Diags.Report(diag::err_auto_tuning_error_dumping) << toString(std::move(E));
+    return;
+  }
+#endif
 
   if (ThinLinkOS)
     ThinLinkOS->keep();

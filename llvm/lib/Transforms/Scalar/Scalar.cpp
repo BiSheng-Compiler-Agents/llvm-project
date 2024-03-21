@@ -64,4 +64,8 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeStraightLineStrengthReduceLegacyPassPass(Registry);
   initializePlaceBackedgeSafepointsLegacyPassPass(Registry);
   initializeLoopSimplifyCFGLegacyPassPass(Registry);
+#if defined(ENABLE_AUTOTUNER)
+  initializeAutoTuningCompileFunctionLegacyPass(Registry);
+  initializeAutoTuningCompileModuleLegacyPass(Registry);
+#endif
 }

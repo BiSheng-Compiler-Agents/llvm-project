@@ -2132,6 +2132,10 @@ static bool annotateAllFunctions(
     F->addFnAttr(Attribute::InlineHint);
     LLVM_DEBUG(dbgs() << "Set inline attribute to function: " << F->getName()
                       << "\n");
+#if defined(ENABLE_AUTOTUNER)
+    if (autotuning::Engine.isEnabled())
+      F->getATEFunction().setHot();
+#endif
   }
   for (auto &F : ColdFunctions) {
     // Only set when there is no Attribute::Hot set by the user. For Hot
@@ -2148,6 +2152,10 @@ static bool annotateAllFunctions(
     F->addFnAttr(Attribute::Cold);
     LLVM_DEBUG(dbgs() << "Set cold attribute to function: " << F->getName()
                       << "\n");
+#if defined(ENABLE_AUTOTUNER)
+    if (autotuning::Engine.isEnabled())
+      F->getATEFunction().setCold();
+#endif
   }
   return true;
 }

@@ -2599,11 +2599,21 @@ public:
   void writeAllAttributeGroups();
 
   void printTypeIdentities();
+#if defined(ENABLE_AUTOTUNER)
+  void printGlobal(const GlobalVariable *GV, bool PrintDeclarationOnly = false);
+  void printAlias(const GlobalAlias *GA);
+  void printIFunc(const GlobalIFunc *GI);
+  void printComdat(const Comdat *C);
+  void printRequisiteDeclarations(const Function *F);
+  void printFunction(const Function *F, bool PrintCompleteIR = false,
+                     bool PrintDeclarationOnly = false);
+#else
   void printGlobal(const GlobalVariable *GV);
   void printAlias(const GlobalAlias *GA);
   void printIFunc(const GlobalIFunc *GI);
   void printComdat(const Comdat *C);
   void printFunction(const Function *F);
+#endif
   void printArgument(const Argument *FA, AttributeSet Attrs);
   void printBasicBlock(const BasicBlock *BB);
   void printInstructionLine(const Instruction &I);
@@ -3590,15 +3600,26 @@ static void maybePrintComdat(formatted_raw_ostream &Out,
   Out << ')';
 }
 
+#if defined(ENABLE_AUTOTUNER)
+void AssemblyWriter::printGlobal(const GlobalVariable *GV,
+                                 bool PrintDeclarationOnly) {
+  if (GV->isMaterializable() && !PrintDeclarationOnly)
+#else
 void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   if (GV->isMaterializable())
+#endif
     Out << "; Materializable\n";
 
   AsmWriterContext WriterCtx(&TypePrinter, &Machine, GV->getParent());
   WriteAsOperandInternal(Out, GV, WriterCtx);
   Out << " = ";
 
+#if defined(ENABLE_AUTOTUNER)
+  if ((!GV->hasInitializer() || PrintDeclarationOnly) &&
+      GV->hasExternalLinkage())
+#else
   if (!GV->hasInitializer() && GV->hasExternalLinkage())
+#endif
     Out << "external ";
 
   Out << getLinkageNameWithSpace(GV->getLinkage());
@@ -3616,7 +3637,11 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   Out << (GV->isConstant() ? "constant " : "global ");
   TypePrinter.print(GV->getValueType(), Out);
 
+#if defined(ENABLE_AUTOTUNER)
+  if (GV->hasInitializer() && !PrintDeclarationOnly) {
+#else
   if (GV->hasInitializer()) {
+#endif
     Out << ' ';
     writeOperand(GV->getInitializer(), false);
   }
@@ -3766,12 +3791,102 @@ void AssemblyWriter::printTypeIdentities() {
   }
 }
 
+#if defined(ENABLE_AUTOTUNER)
+/// printRequisiteDeclarations - Print the declarations of type identities,
+/// global variables, functions, and function attribute groups of a function.
+void AssemblyWriter::printRequisiteDeclarations(const Function *F) {
+  // walk through instructions and collect global variables & functions
+  SmallPtrSet<GlobalVariable *, 8> GVs;
+  SmallPtrSet<Function *, 8> Functions;
+  for (const BasicBlock &BB : *F) {
+    for (const Instruction &I : BB) {
+      // Check for function
+      if (const auto *CI = dyn_cast<CallInst>(&I)) {
+        Function *func = CI->getCalledFunction();
+        if (func)
+          Functions.insert(func);
+      }
+      // Check for global variables
+      for (const Use &U : I.operands()) {
+        if (GlobalVariable *gv = dyn_cast<GlobalVariable>(U))
+          GVs.insert(gv);
+        if (GEPOperator *gepo = dyn_cast<GEPOperator>(&U)) {
+          if (GlobalVariable *gv =
+                  dyn_cast<GlobalVariable>(gepo->getPointerOperand()))
+            GVs.insert(gv);
+          for (auto it = gepo->idx_begin(), et = gepo->idx_end(); it != et;
+               ++it) {
+            if (GlobalVariable *gv = dyn_cast<GlobalVariable>(*it))
+              GVs.insert(gv);
+          }
+        }
+      }
+    }
+  }
+
+  // print type identities
+  printTypeIdentities();
+
+  // print global variables
+  if (!GVs.empty()) {
+    Out << '\n';
+    for (auto GVit = GVs.begin(), et = GVs.end(); GVit != et; ++GVit) {
+      // Make backups of some properties. They may be modified for printing.
+      GlobalValue::LinkageTypes SavedLinkage = (*GVit)->getLinkage();
+      GlobalVariable::VisibilityTypes SavedVisibility =
+          (*GVit)->getVisibility();
+
+      // modify property if needed
+      if (!(*GVit)->hasAvailableExternallyLinkage() &&
+          !((*GVit)->getName() == "llvm.global_ctors") &&
+          (*GVit)->hasLocalLinkage()) {
+        (*GVit)->setLinkage(GlobalValue::ExternalLinkage);
+        (*GVit)->setVisibility(GlobalValue::HiddenVisibility);
+      }
+
+      printGlobal(*GVit, true);
+      Out << '\n';
+
+      // restore backups
+      (*GVit)->setLinkage(SavedLinkage);
+      (*GVit)->setVisibility(SavedVisibility);
+    }
+    Out << '\n';
+  }
+
+  // print functions
+  for (auto FuncIt = Functions.begin(), et = Functions.end(); FuncIt != et;
+       ++FuncIt) {
+    Out << '\n';
+    printFunction(*FuncIt, false, true);
+  }
+
+  // Write attribute groups.
+  if (!Machine.as_empty()) {
+    Out << '\n';
+    writeAllAttributeGroups();
+  }
+  Out << '\n';
+}
+
 /// printFunction - Print all aspects of a function.
+void AssemblyWriter::printFunction(const Function *F, bool PrintCompleteIR,
+                                   bool PrintDeclarationOnly) {
+  if (PrintCompleteIR && !PrintDeclarationOnly) {
+    printRequisiteDeclarations(F);
+  }
+  if (AnnotationWriter && !PrintDeclarationOnly)
+    AnnotationWriter->emitFunctionAnnot(F, Out);
+
+  if (F->isMaterializable() && !PrintDeclarationOnly)
+    Out << "; Materializable\n";
+#else
 void AssemblyWriter::printFunction(const Function *F) {
   if (AnnotationWriter) AnnotationWriter->emitFunctionAnnot(F, Out);
 
   if (F->isMaterializable())
     Out << "; Materializable\n";
+#endif
 
   const AttributeList &Attrs = F->getAttributes();
   if (Attrs.hasFnAttrs()) {
@@ -3789,6 +3904,18 @@ void AssemblyWriter::printFunction(const Function *F) {
       Out << "; Function Attrs: " << AttrStr << '\n';
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  if (!PrintDeclarationOnly)
+    Machine.incorporateFunction(F);
+
+  if (F->isDeclaration() || PrintDeclarationOnly) {
+    Out << "declare";
+    if (!PrintDeclarationOnly) {
+      SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+      F->getAllMetadata(MDs);
+      printMetadataAttachments(MDs, " ");
+    }
+#else
   Machine.incorporateFunction(F);
 
   if (F->isDeclaration()) {
@@ -3796,6 +3923,7 @@ void AssemblyWriter::printFunction(const Function *F) {
     SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
     F->getAllMetadata(MDs);
     printMetadataAttachments(MDs, " ");
+#endif
     Out << ' ';
   } else
     Out << "define ";
@@ -3821,7 +3949,11 @@ void AssemblyWriter::printFunction(const Function *F) {
   Out << '(';
 
   // Loop over the arguments, printing them...
+#if defined(ENABLE_AUTOTUNER)
+  if ((F->isDeclaration() && !IsForDebug) || PrintDeclarationOnly) {
+#else
   if (F->isDeclaration() && !IsForDebug) {
+#endif
     // We're only interested in the type here - don't print argument names.
     for (unsigned I = 0, E = FT->getNumParams(); I != E; ++I) {
       // Insert commas as we go... the first arg doesn't get a comma
@@ -3892,7 +4024,11 @@ void AssemblyWriter::printFunction(const Function *F) {
     writeOperand(F->getPersonalityFn(), /*PrintType=*/true);
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  if (F->isDeclaration() || PrintDeclarationOnly) {
+#else
   if (F->isDeclaration()) {
+#endif
     Out << '\n';
   } else {
     SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
@@ -3910,6 +4046,13 @@ void AssemblyWriter::printFunction(const Function *F) {
     Out << "}\n";
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  // Output metadata
+  if (!Machine.mdn_empty() && PrintCompleteIR && !PrintDeclarationOnly) {
+    Out << '\n';
+    writeAllMDNodes();
+  }
+#endif
   Machine.purgeFunction();
 }
 
@@ -4588,13 +4731,21 @@ void AssemblyWriter::printUseLists(const Function *F) {
 
 void Function::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
                      bool ShouldPreserveUseListOrder,
+#if defined(ENABLE_AUTOTUNER)
+                     bool IsForDebug, bool PrintCompleteIR) const {
+#else
                      bool IsForDebug) const {
+#endif
   SlotTracker SlotTable(this->getParent());
   formatted_raw_ostream OS(ROS);
   AssemblyWriter W(OS, SlotTable, this->getParent(), AAW,
                    IsForDebug,
                    ShouldPreserveUseListOrder);
+#if defined(ENABLE_AUTOTUNER)
+  W.printFunction(this, PrintCompleteIR);
+#else
   W.printFunction(this);
+#endif
 }
 
 void BasicBlock::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,

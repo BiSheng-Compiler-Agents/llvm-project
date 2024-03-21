@@ -645,6 +645,18 @@ static int compileModule(char **argv, LLVMContext &Context) {
       reportError(EC.message(), SplitDwarfOutputFile);
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  if (llvm::Error E = autotuning::Engine.init(M->getModuleIdentifier())) {
+    errs() << "error: " << toString(std::move(E)) << '\n';
+    return 1;
+  }
+  if (autotuning::Engine.isEnabled() && autotuning::Engine.isParseInput() &&
+      (autotuning::Engine.LLVMParams.size() ||
+       autotuning::Engine.ProgramParams.size()))
+    llvm::cl::ParseAutoTunerOptions(autotuning::Engine.LLVMParams,
+                                    autotuning::Engine.ProgramParams);
+#endif
+
   // Build up all of the passes that we want to do to the module.
   legacy::PassManager PM;
 
@@ -775,6 +787,13 @@ static int compileModule(char **argv, LLVMContext &Context) {
       Out->os() << Buffer;
     }
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  if (llvm::Error E = autotuning::Engine.finalize()) {
+    errs() << "error: " << toString(std::move(E)) << '\n';
+    return 1;
+  }
+#endif
 
   // Declare success.
   Out->keep();

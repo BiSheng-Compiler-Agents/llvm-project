@@ -30,6 +30,7 @@ add_llvm_component_library(LLVMAnalysis
   Analysis.cpp
   AssumeBundleQueries.cpp
   AssumptionCache.cpp
+  AutotuningDump.cpp
   BasicAliasAnalysis.cpp
   BlockFrequencyInfo.cpp
   BlockFrequencyInfoImpl.cpp
@@ -153,6 +154,7 @@ add_llvm_component_library(LLVMAnalysis
   ${MLLinkDeps}
 
   LINK_COMPONENTS
+  AutoTuner
   BinaryFormat
   Core
   Object

@@ -54,6 +54,9 @@
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 #include "llvm/Transforms/Vectorize.h"
 #include <cstdlib>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/Transforms/Scalar/AutoTuningCompile.h"
+#endif
 
 namespace {
   struct ForcePassLinking {
@@ -93,6 +96,11 @@ namespace {
       (void) llvm::createInstSimplifyLegacyPass();
       (void) llvm::createInstructionCombiningPass();
       (void) llvm::createJMCInstrumenterPass();
+#if defined(ENABLE_AUTOTUNER)
+      (void) llvm::createAutotuningDumpPass();
+      (void) llvm::createAutoTuningCompileFunctionLegacyPass();
+      (void) llvm::createAutoTuningCompileModuleLegacyPass();
+#endif
       (void) llvm::createKCFIPass();
       (void) llvm::createLCSSAPass();
       (void) llvm::createLICMPass();

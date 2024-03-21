@@ -15,6 +15,9 @@
 #define LLVM_IR_STRUCTURALHASH_H
 
 #include <cstdint>
+#if defined(ENABLE_AUTOTUNER)
+#include <vector>
+#endif
 
 namespace llvm {
 
@@ -24,6 +27,17 @@ class Module;
 uint64_t StructuralHash(const Function &F);
 uint64_t StructuralHash(const Module &M);
 
+#if defined(ENABLE_AUTOTUNER)
+class MachineBasicBlock;
+class BasicBlock;
+class CallBase;
+class SwitchInst;
+
+uint64_t StructuralHash(const std::vector<BasicBlock *> BBs);
+uint64_t StructuralHash(const MachineBasicBlock &MBB);
+uint64_t StructuralHash(const CallBase &CB);
+uint64_t StructuralHash(const SwitchInst &SI);
+#endif
 } // end namespace llvm
 
 #endif

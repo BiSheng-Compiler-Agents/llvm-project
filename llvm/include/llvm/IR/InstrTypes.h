@@ -1169,6 +1169,23 @@ public:
 using OperandBundleDef = OperandBundleDefT<Value *>;
 using ConstOperandBundleDef = OperandBundleDefT<const Value *>;
 
+#if defined(ENABLE_AUTOTUNER)
+//===----------------------------------------------------------------------===//
+//                    AutoTuningEnabledCallSite Class
+//===----------------------------------------------------------------------===//
+class CallBase;
+class AutoTuningEnabledCallSite : public autotuning::Container {
+public:
+  AutoTuningEnabledCallSite() = delete;
+  void initCodeRegion() override;
+  uint64_t computeStructuralHash() override;
+  AutoTuningEnabledCallSite(CallBase *CallBase) { CB = CallBase; }
+
+private:
+  CallBase *CB;
+};
+#endif
+
 //===----------------------------------------------------------------------===//
 //                               CallBase Class
 //===----------------------------------------------------------------------===//
@@ -1229,6 +1246,13 @@ protected:
   unsigned getNumSubclassExtraOperandsDynamic() const;
 
 public:
+#if defined(ENABLE_AUTOTUNER)
+  // There is one-to-one correspondence between ATECallSite and CallBase class
+  // to enable auto-tuning.
+  std::unique_ptr<AutoTuningEnabledCallSite> ATECallSite =
+      std::make_unique<AutoTuningEnabledCallSite>(this);
+#endif
+
   using Instruction::getContext;
 
   /// Create a clone of \p CB with a different set of operand bundles and

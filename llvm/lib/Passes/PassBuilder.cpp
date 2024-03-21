@@ -262,6 +262,11 @@
 #include "llvm/Transforms/Vectorize/VectorCombine.h"
 #include <optional>
 
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/Analysis/AutotuningDump.h"
+#include "llvm/Transforms/Scalar/AutoTuningCompile.h"
+#endif
+
 using namespace llvm;
 
 static const Regex DefaultAliasRegex(

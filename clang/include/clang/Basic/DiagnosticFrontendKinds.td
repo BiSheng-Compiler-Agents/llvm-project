@@ -346,4 +346,12 @@ def warn_profile_data_misexpect : Warning<
 def err_extract_api_ignores_file_not_found :
   Error<"file '%0' specified by '--extract-api-ignores=' not found">, DefaultFatal;
 
+#ifdef ENABLE_AUTOTUNER
+let CategoryName = "AutoTuning Issues" in {
+def err_auto_tuning_error_reading : Error<"'%0'">;
+def err_auto_tuning_error_dumping : Error<"'%0'">;
+def err_unable_to_create_pass : Error<
+    "cannot create pass '%0' from AutoTuning input file">;
+} // end of autoTuning issue category
+#endif
 }

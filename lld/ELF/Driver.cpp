@@ -341,6 +341,18 @@ void LinkerDriver::addLibrary(StringRef name) {
 // Technically this can be delayed until we read bitcode files, but
 // we don't bother to do lazily because the initialization is fast.
 static void initLLVM() {
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - initialization
+  if (Error E = autotuning::Engine.init(config->outputFile.data())) {
+    error(toString(std::move(E)));
+    return;
+  }
+  if (autotuning::Engine.isEnabled() && autotuning::Engine.isParseInput() &&
+      (autotuning::Engine.LLVMParams.size() ||
+       autotuning::Engine.ProgramParams.size()))
+    llvm::cl::ParseAutoTunerOptions(autotuning::Engine.LLVMParams,
+                                    autotuning::Engine.ProgramParams);
+#endif
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmPrinters();
@@ -2814,6 +2826,12 @@ void LinkerDriver::link(opt::InputArgList &args) {
   reportBackrefs();
   writeArchiveStats();
   writeWhyExtract();
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - finalization
+  if (Error E = autotuning::Engine.finalize()) {
+    error(toString(std::move(E)));
+  }
+#endif
   if (errorCount())
     return;
 

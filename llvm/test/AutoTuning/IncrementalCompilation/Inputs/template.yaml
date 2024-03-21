@@ -1,0 +1,9 @@
+--- !AutoTuning
+Pass:            [dummy-pass]
+CodeRegionType:  [dummy-type]
+Name:            foo
+DebugLoc:        { File: [dummy-file], Line: 0, Column: 0 }
+Function:        foo
+CodeRegionHash:  0
+Invocation:      0
+...

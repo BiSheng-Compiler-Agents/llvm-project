@@ -57,6 +57,7 @@ add_llvm_component_library(LLVMipo
   LINK_COMPONENTS
   AggressiveInstCombine
   Analysis
+  AutoTuner
   BitReader
   BitWriter
   Core

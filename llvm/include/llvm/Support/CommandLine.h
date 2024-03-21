@@ -40,6 +40,9 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(ENABLE_AUTOTUNER)
+#include <unordered_map>
+#endif
 namespace llvm {
 
 namespace vfs {
@@ -71,6 +74,20 @@ bool ParseCommandLineOptions(int argc, const char *const *argv,
                              raw_ostream *Errs = nullptr,
                              const char *EnvVar = nullptr,
                              bool LongOptionsUseDoubleDash = false);
+
+#if defined(ENABLE_AUTOTUNER)
+// It will parse AutoTuner options (LLVMParams & ProgramParams) and add them as
+// command line flags for the compilation process. These options are suggested
+// by AutoTuner during tuning flow. This function will always be called after
+// AutoTuner initialization.
+// Returns true on success. Otherwise, this will print the error message to
+// stderr and exit.
+bool ParseAutoTunerOptions(
+    std::unordered_map<std::string, std::string> LLVMParams,
+    std::unordered_map<std::string, std::string> ProgramParams,
+    StringRef Overview = "", raw_ostream *Errs = nullptr,
+    const char *EnvVar = nullptr, bool LongOptionsUseDoubleDash = false);
+#endif
 
 // Function pointer type for printing version information.
 using VersionPrinterTy = std::function<void(raw_ostream &)>;

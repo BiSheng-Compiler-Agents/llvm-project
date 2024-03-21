@@ -20,6 +20,10 @@
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
 #include <string>
+#if defined(ENABLE_AUTOTUNER)
+#include <map>
+#include <vector>
+#endif
 
 namespace llvm {
 namespace remarks {
@@ -47,6 +51,9 @@ struct Argument {
   StringRef Key;
   // FIXME: We might want to be able to store other types than strings here.
   StringRef Val;
+#if defined(ENABLE_AUTOTUNER)
+  std::optional<std::vector<StringRef>> VectorVal;
+#endif
   // If set, the debug location corresponding to the value.
   std::optional<RemarkLocation> Loc;
 
@@ -65,6 +72,9 @@ enum class Type {
   Analysis,
   AnalysisFPCommute,
   AnalysisAliasing,
+#if defined(ENABLE_AUTOTUNER)
+  AutoTuning,
+#endif
   Failure,
   First = Unknown,
   Last = Failure
@@ -104,6 +114,28 @@ struct Remark {
 
   /// Mangled name of the function that triggers the emssion of this remark.
   StringRef FunctionName;
+
+#if defined(ENABLE_AUTOTUNER)
+  /// Type of the code region that the remark is associated with.
+  std::optional<StringRef> CodeRegionType;
+
+  /// Configuration value for generating the same baseline binary associated
+  /// with this remark.
+  std::optional<std::map<std::string, std::string>> BaselineConfig;
+
+  /// Hash of the code region that the remark is associated with.
+  std::optional<uint64_t> CodeRegionHash;
+
+  /// Configs values passed to AutoTuner for dynamic setting of search space
+  /// for code regions.
+  std::optional<std::map<std::string, std::vector<unsigned int>>>
+      AutoTunerOptions;
+
+  /// Invocation/Registering of Optimization Pass in the compilation pipeline.
+  /// It is used to differentiate between different invocations of same
+  /// optimization pass.
+  std::optional<unsigned int> Invocation;
+#endif
 
   /// The location in the source file of the remark.
   std::optional<RemarkLocation> Loc;

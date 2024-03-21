@@ -1,0 +1,8 @@
+--- !AutoTuning
+Pass:            loop-unroll
+CodeRegionType:  loop
+CodeRegionHash:  [hash]
+Args:
+  - UnrollCount: [number]
+Invocation:      1
+...

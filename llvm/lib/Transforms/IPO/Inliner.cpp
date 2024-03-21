@@ -64,6 +64,9 @@
 #include <functional>
 #include <utility>
 #include <vector>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 using namespace llvm;
 
@@ -298,6 +301,27 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
   // be deleted as a batch after inlining.
   SmallVector<Function *, 4> DeadFunctionsInComdats;
 
+#if defined(ENABLE_AUTOTUNER)
+  bool IsAutoTunerEnabled =
+      autotuning::Engine.isEnabled() &&
+      autotuning::Engine.isTuningAllowedForType(autotuning::CallSite);
+  if (IsAutoTunerEnabled) {
+    SmallVector<std::pair<CallBase *, int>, 16> CallsCopy = Calls;
+    for (int I = 0; I < (int)CallsCopy.size(); ++I) {
+      CallBase &CB = *CallsCopy[I].first;
+      DebugLoc DLoc = CB.getDebugLoc();
+      if (!CB.getCaller() || !CB.getCalledFunction() || !DLoc)
+        continue;
+      autotuning::CallSiteLocation Loc = autotuning::CallSiteLocation{
+          &CB, CB.getCaller(), CB.getCalledFunction(),
+          autotuning::SourceLocation{DLoc->getFilename().str(), DLoc->getLine(),
+                                     DLoc->getColumn()}};
+      autotuning::Engine.insertCallSiteLoc(Loc);
+    }
+    autotuning::Engine.cleanCallSiteLoc();
+  }
+#endif
+
   // Loop forward over all of the calls. Note that we cannot cache the size as
   // inlining can introduce new calls that need to be processed.
   for (int I = 0; I < (int)Calls.size(); ++I) {
@@ -412,6 +436,13 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
           if (NewCallee) {
             if (!NewCallee->isDeclaration()) {
               Calls.push_back({ICB, NewHistoryID});
+#if defined(ENABLE_AUTOTUNER)
+              if (IsAutoTunerEnabled)
+                if (ICB->getDebugLoc())
+                  autotuning::Engine.updateCallSiteLocs(
+                      CB, ICB, ICB->getCalledFunction(),
+                      ICB->getDebugLoc()->getLine());
+#endif
               // Continually inlining through an SCC can result in huge compile
               // times and bloated code since we arbitrarily stop at some point
               // when the inliner decides it's not profitable to inline anymore.
@@ -526,6 +557,11 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
     // invalidate analyses for all functions in this SCC later.
     FAM.invalidate(F, PreservedAnalyses::none());
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  if (IsAutoTunerEnabled)
+    autotuning::Engine.clearCallSiteLocs();
+#endif
 
   // We must ensure that we only delete functions with comdats if every function
   // in the comdat is going to be deleted.

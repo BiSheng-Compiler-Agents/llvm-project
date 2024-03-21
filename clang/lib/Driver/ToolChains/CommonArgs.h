@@ -220,6 +220,14 @@ void addMachineOutlinerArgs(const Driver &D, const llvm::opt::ArgList &Args,
                             const llvm::Triple &Triple, bool IsLTO,
                             const StringRef PluginOptPrefix = "");
 
+#if defined(ENABLE_AUTOTUNER)
+void AddAutoTuningOpportunities(const llvm::opt::ArgList &Args, const Driver &D,
+                                llvm::opt::ArgStringList &CmdArgs,
+                                bool isThinLTO = false);
+void AddAutoTuningInput(const llvm::opt::ArgList &Args, const Driver &D,
+                        llvm::opt::ArgStringList &CmdArgs);
+#endif
+
 void addOpenMPDeviceRTL(const Driver &D, const llvm::opt::ArgList &DriverArgs,
                         llvm::opt::ArgStringList &CC1Args,
                         StringRef BitcodeSuffix, const llvm::Triple &Triple);

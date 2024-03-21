@@ -29,6 +29,24 @@ using namespace llvm;
 
 #define DEBUG_TYPE "calcspillweights"
 
+#if defined(ENABLE_AUTOTUNER)
+static cl::opt<float> LoopWeight(
+    "reg-spill-loop-weight", cl::Hidden,
+    cl::desc(
+        "Tunable extra weight to what looks like a loop induction variable"),
+    cl::init(3));
+
+static cl::opt<float> RemaWeight(
+    "reg-spill-rematerialize-weight", cl::Hidden,
+    cl::desc("Tunable reduced weight giving re-materialize oppotunities"),
+    cl::init(0.5f));
+
+static cl::opt<float>
+    HintWeight("reg-spill-hint-weight", cl::Hidden,
+               cl::desc("Tunable weakly boost weight of hinted registers"),
+               cl::init(1.01f));
+#endif
+
 void VirtRegAuxInfo::calculateSpillWeightsAndHints() {
   LLVM_DEBUG(dbgs() << "********** Compute Spill Weights **********\n"
                     << "********** Function: " << MF.getName() << '\n');
@@ -252,7 +270,11 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
 
       // Give extra weight to what looks like a loop induction variable update.
       if (Writes && IsExiting && LIS.isLiveOutOfMBB(LI, MBB))
+#if defined(ENABLE_AUTOTUNER)
+        Weight *= LoopWeight;
+#else
         Weight *= 3;
+#endif
 
       TotalWeight += Weight;
     }
@@ -288,7 +310,11 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
     }
 
     // Weakly boost the spill weight of hinted registers.
+#if defined(ENABLE_AUTOTUNER)
+    TotalWeight *= HintWeight;
+#else
     TotalWeight *= 1.01F;
+#endif
   }
 
   // If the live interval was already unspillable, leave it that way.
@@ -315,7 +341,11 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &LI, SlotIndex *Start,
   // FIXME: this gets much more complicated once we support non-trivial
   // re-materialization.
   if (isRematerializable(LI, LIS, VRM, *MF.getSubtarget().getInstrInfo()))
+#if defined(ENABLE_AUTOTUNER)
+    TotalWeight *= RemaWeight;
+#else
     TotalWeight *= 0.5F;
+#endif
 
   if (IsLocalSplitArtifact)
     return normalize(TotalWeight, Start->distance(*End), NumInstr);

@@ -340,6 +340,11 @@ void initializeWasmEHPreparePass(PassRegistry&);
 void initializeWinEHPreparePass(PassRegistry&);
 void initializeWriteBitcodePassPass(PassRegistry&);
 void initializeXRayInstrumentationPass(PassRegistry&);
+#if defined(ENABLE_AUTOTUNER)
+void initializeAutotuningDumpLegacyPass(PassRegistry &);
+void initializeAutoTuningCompileFunctionLegacyPass(PassRegistry &);
+void initializeAutoTuningCompileModuleLegacyPass(PassRegistry &);
+#endif
 
 } // end namespace llvm
 

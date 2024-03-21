@@ -45,6 +45,9 @@
 #include <cstdint>
 #include <optional>
 #include <vector>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/IR/StructuralHash.h"
+#endif
 
 using namespace llvm;
 
@@ -258,6 +261,89 @@ void LandingPadInst::addClause(Constant *Val) {
   setNumHungOffUseOperands(getNumOperands() + 1);
   getOperandList()[OpNo] = Val;
 }
+
+#if defined(ENABLE_AUTOTUNER)
+uint64_t AutoTuningEnabledSwitchInst::computeStructuralHash() {
+  return StructuralHash(*(this->SI));
+}
+
+void AutoTuningEnabledSwitchInst::initCodeRegion() {
+  std::string SwitchName;
+  if (this->SI->hasName()) {
+    SwitchName = this->SI->getName().str();
+  } else {
+    std::string Str;
+    llvm::raw_string_ostream RSO(Str);
+    this->SI->getCondition()->printAsOperand(RSO);
+    SwitchName = RSO.str();
+  }
+
+  autotuning::CodeRegion CR = autotuning::CodeRegion(
+      SwitchName, this->SI->getFunction()->getName().str(),
+      autotuning::CodeRegionType::Switch, this->SI->getDebugLoc());
+
+  unsigned TotalNumInsts = 0;
+  for (auto Case : SI->cases()) {
+    const BasicBlock *BB = Case.getCaseSuccessor();
+    unsigned NumInsts = std::distance(BB->instructionsWithoutDebug().begin(),
+                                      BB->instructionsWithoutDebug().end());
+    TotalNumInsts += NumInsts;
+  }
+
+  CR.setSize(TotalNumInsts);
+  // Compute hotness.
+  autotuning::HotnessType Hotness =
+      this->SI->getFunction()->ATEFunction.getHotness();
+  CR.setHotness(Hotness);
+
+  this->setCodeRegion(CR);
+}
+
+uint64_t AutoTuningEnabledCallSite::computeStructuralHash() {
+  return StructuralHash(*(this->CB));
+}
+
+void AutoTuningEnabledCallSite::initCodeRegion() {
+  // Use Caller's name as FuncName and Callee's name as Name of a CodeRegion.
+  Function *Caller = this->CB->getCaller();
+  Function *Callee = this->CB->getCalledFunction();
+  if (Caller == nullptr || Callee == nullptr) {
+    this->setCodeRegion(autotuning::CodeRegion::getInvalidInstance());
+    return;
+  }
+
+  autotuning::SourceLocation SrcLoc;
+  if (this->CB->getDebugLoc()) {
+    unsigned int SourceLine = this->CB->getDebugLoc()->getLine();
+    // Get modified source line number for current callsite if there is another
+    // call instruction (to same callee) which has same source line number
+    // happened due to inlining.
+    std::optional<unsigned int> LineNum = autotuning::Engine.getCallSiteLoc(CB);
+    if (LineNum)
+      SourceLine = *LineNum;
+    SrcLoc = autotuning::SourceLocation{
+        this->CB->getDebugLoc()->getFilename().str(), SourceLine,
+        this->CB->getDebugLoc()->getColumn()};
+  }
+
+  // We are using DebugLoc to distinguish between multiple calls to the same
+  // callee in a function. It may be possible that these multiple calls have
+  // same DebugLoc either 1) due to inlining of multiple calls (same callee)
+  // and callee having more calls, or 2) cloned calls added by previous
+  // optimizations. We are using 'callee name + it's parent (basic block) name'
+  // to solve these problems. Additionally we are using modified line number
+  // for the issue # 1; this will handle the cases where the multiple calls are
+  // in the same basic block.
+  autotuning::CodeRegion CR = autotuning::CodeRegion(
+      Callee->getName().str() + "-" + this->CB->getParent()->getName().str(),
+      Caller->getName().data(), autotuning::CodeRegionType::CallSite, SrcLoc,
+      autotuning::DynamicOptions{{"ForceInline", {0, 1}}});
+
+  CR.setSize(Callee->getInstructionCount());
+  CR.setHotness(Caller->ATEFunction.getHotness());
+  this->setCodeRegion(CR);
+}
+#endif
 
 //===----------------------------------------------------------------------===//
 //                        CallBase Implementation

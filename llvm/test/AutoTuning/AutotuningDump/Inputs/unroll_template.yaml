@@ -1,0 +1,8 @@
+--- !AutoTuning
+Pass:            loop-unroll
+Name:            [name]
+Function:        foo
+CodeRegionType:  loop
+Args:
+  - UnrollCount: [number]
+...

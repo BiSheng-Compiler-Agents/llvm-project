@@ -1,0 +1,1 @@
+!AutoTuning {Args: [{UnrollCount: 8}], CodeRegionHash: 1116845059539910783, CodeRegionType: loop, DebugLoc: {Column: 3, File: clang/test/Autotuning/LTO/Inputs/src/output.c, Line: 5}, Function: output_data, Invocation: 1, Name: for.body, Pass: loop-unroll}

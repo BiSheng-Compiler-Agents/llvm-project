@@ -1,0 +1,3 @@
+!AutoTuning {Args: [{UnrollCount: 2}], CodeRegionType: loop, DebugLoc: {
+  Column: 5, File: clang/test/Autotuning/LoopDump/multiple_loops.c, Line: 21},
+  Function: sum1d, Name: for.body, Pass: loop-unroll}

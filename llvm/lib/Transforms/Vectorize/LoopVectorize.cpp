@@ -10178,6 +10178,22 @@ LoopVectorizePass::LoopVectorizePass(LoopVectorizeOptions Opts)
       VectorizeOnlyWhenForced(Opts.VectorizeOnlyWhenForced ||
                               !EnableLoopVectorization) {}
 
+#if defined(ENABLE_AUTOTUNER)
+// Given the iterleave count (IC) and CR, compute the dynamic values for
+// interleave count. Then add it to CR.
+static void
+computeAutoTunerDynamicInterleaveOptions(unsigned IC,
+                                         const autotuning::CodeRegion &CR) {
+
+  std::vector<unsigned int> AutoTunerOptions{1, 2, 4};
+  if (std::find(AutoTunerOptions.begin(), AutoTunerOptions.end(), IC) ==
+      AutoTunerOptions.end())
+    AutoTunerOptions[2] = IC;
+
+  CR.addAutoTunerOptions("VectorizationInterleave", AutoTunerOptions);
+}
+#endif
+
 bool LoopVectorizePass::processLoop(Loop *L) {
   assert((EnableVPlanNativePath || L->isInnermost()) &&
          "VPlan-native path is not enabled. Only process inner loops.");
@@ -10190,6 +10206,12 @@ bool LoopVectorizePass::processLoop(Loop *L) {
                     << L->getHeader()->getParent()->getName() << "' from "
                     << DebugLocStr << "\n");
 
+#if defined(ENABLE_AUTOTUNER)
+  // Initialize the loop for auto-tuning but do not add it
+  // as an tuning opportunity yet.
+  autotuning::Engine.initContainer(
+      L, LV_NAME, L->getHeader()->getParent()->getName(), false);
+#endif
   LoopVectorizeHints Hints(L, InterleaveOnlyWhenForced, *ORE, TTI);
 
   LLVM_DEBUG(
@@ -10421,6 +10443,18 @@ bool LoopVectorizePass::processLoop(Loop *L) {
         "but is explicitly disabled or interleave count is set to 1");
     InterleaveLoop = false;
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  if (!VectorizerParams::isInterleaveForced()) {
+    // Compute the dynamic values for VectorizationInterleave and add it to the
+    // CodeRegion.
+    computeAutoTunerDynamicInterleaveOptions(IC, L->getCodeRegion());
+
+    // Add the current loop as a tuning opportunity explicitly.
+    autotuning::Engine.addOpportunity(
+        L->getCodeRegion(), {{"VectorizationInterleave", std::to_string(IC)}});
+  }
+#endif
 
   // Override IC if user provided an interleave count.
   IC = UserIC > 0 ? UserIC : IC;

@@ -1,0 +1,9 @@
+--- !AutoTuning
+Pass:            loop-vectorize
+Name:            bb4
+Function:        TestFoo
+CodeRegionType:  loop
+CodeRegionHash:  14229620333597121971
+Args:
+- VectorizationInterleave: [number]
+...

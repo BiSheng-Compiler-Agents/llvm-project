@@ -21,6 +21,7 @@ add_llvm_component_library(LLVMVectorize
 
   LINK_COMPONENTS
   Analysis
+  AutoTuner
   Core
   Support
   TransformUtils

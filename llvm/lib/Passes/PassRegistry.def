@@ -29,6 +29,10 @@ MODULE_ANALYSIS("pass-instrumentation", PassInstrumentationAnalysis(PIC))
 MODULE_ANALYSIS("inline-advisor", InlineAdvisorAnalysis())
 MODULE_ANALYSIS("ir-similarity", IRSimilarityAnalysis())
 
+#if defined(ENABLE_AUTOTUNER)
+MODULE_ANALYSIS("autotuning-dump", AutotuningDumpAnalysis())
+#endif
+
 #ifndef MODULE_ALIAS_ANALYSIS
 #define MODULE_ALIAS_ANALYSIS(NAME, CREATE_PASS)                               \
   MODULE_ANALYSIS(NAME, CREATE_PASS)
@@ -127,6 +131,9 @@ MODULE_PASS("sanmd-module", SanitizerBinaryMetadataPass())
 MODULE_PASS("memprof-module", ModuleMemProfilerPass())
 MODULE_PASS("poison-checking", PoisonCheckingPass())
 MODULE_PASS("pseudo-probe-update", PseudoProbeUpdatePass())
+#if defined(ENABLE_AUTOTUNER)
+MODULE_PASS("autotuning-compile-module", AutoTuningCompileModulePass())
+#endif
 #undef MODULE_PASS
 
 #ifndef MODULE_PASS_WITH_PARAMS
@@ -430,6 +437,9 @@ FUNCTION_PASS("transform-warning", WarnMissedTransformationsPass())
 FUNCTION_PASS("tsan", ThreadSanitizerPass())
 FUNCTION_PASS("memprof", MemProfilerPass())
 FUNCTION_PASS("declare-to-assign", llvm::AssignmentTrackingPass())
+#if defined(ENABLE_AUTOTUNER)
+FUNCTION_PASS("autotuning-compile-function", AutoTuningCompileFunctionPass())
+#endif
 #undef FUNCTION_PASS
 
 #ifndef FUNCTION_PASS_WITH_PARAMS
@@ -614,6 +624,9 @@ LOOP_PASS("guard-widening", GuardWideningPass())
 LOOP_PASS("loop-bound-split", LoopBoundSplitPass())
 LOOP_PASS("loop-reroll", LoopRerollPass())
 LOOP_PASS("loop-versioning-licm", LoopVersioningLICMPass())
+#if defined(ENABLE_AUTOTUNER)
+LOOP_PASS("autotuning-compile-loop", AutoTuningCompileLoopPass())
+#endif
 #undef LOOP_PASS
 
 #ifndef LOOP_PASS_WITH_PARAMS

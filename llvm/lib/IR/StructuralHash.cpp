@@ -10,8 +10,22 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/CommandLine.h"
+#endif
 
 using namespace llvm;
+
+#if defined(ENABLE_AUTOTUNER)
+// AutoTuner Flag to use callsite Debug Location for hash cacluation.
+static cl::opt<bool> HashCallSite(
+    "hash-prior-to-callsite", cl::init(true), cl::Hidden,
+    cl::desc("Use function IR prior to a call site to compute the hashcode for"
+             " the call site"));
+#endif
 
 namespace {
 
@@ -21,16 +35,81 @@ namespace {
 
 class StructuralHashImpl {
   hash_code Hash;
+#if defined(ENABLE_AUTOTUNER)
+  const uint64_t BLOCK_HEADER_HASH = 45798;
+#endif
 
   template <typename T> void hash(const T &V) { Hash = hash_combine(Hash, V); }
 
 public:
   StructuralHashImpl() : Hash(4) {}
 
+#if defined(ENABLE_AUTOTUNER)
+  void update(const MachineBasicBlock &MBB) {
+    // Update the structural hash when we encounter a new basic block.
+    // Prevents CodeRegions with different structures, but many empty
+    // BasicBlocks to have the same structural hash.
+    if (const BasicBlock *Block = MBB.getBasicBlock()) {
+      hash(BLOCK_HEADER_HASH); // Block header
+      for (auto &Inst : *Block)
+        hash(Inst.getOpcode());
+    }
+  }
+
+  void update(const std::vector<BasicBlock *> BBs) {
+    // Update the structural hash when we encounter a new basic block.
+    // Prevents CodeRegions with different structures, but many empty
+    // BasicBlocks to have the same structural hash.
+    for (BasicBlock *BB : BBs) {
+      if (BB == nullptr)
+        continue;
+
+      hash(BLOCK_HEADER_HASH); // Block header
+      for (auto &Inst : *BB)
+        hash(Inst.getOpcode());
+    }
+  }
+
+  void update(const llvm::CallBase &CB) {
+    StringRef Name = "";
+    if (HashCallSite) {
+      update(*CB.getCaller(), std::addressof(CB));
+    } else {
+      const Function &F = *CB.getCaller();
+      Name = F.getName();
+      std::string FileName = Name.str();
+      for (uint64_t Idx = 0; Idx < Name.size(); Idx = Idx + sizeof(uint64_t)) {
+        uint64_t Value = 0;
+        FileName.copy((char *)&Value, sizeof(uint64_t), Idx);
+        hash(Value);
+      }
+    }
+
+    update(*CB.getCalledFunction());
+  }
+
+  void update(const SwitchInst &SI) {
+    hash(SI.getNumCases());
+    for (auto Case : SI.cases()) {
+      hash(BLOCK_HEADER_HASH);
+      const BasicBlock *BB = Case.getCaseSuccessor();
+      for (auto &Inst : *BB)
+        hash(Inst.getOpcode());
+    }
+  }
+
+  void update(const Function &F, const CallBase *TargetCB = nullptr) {
+    if (F.isDeclaration())
+      return;
+
+    const Instruction *I =
+        TargetCB ? (dyn_cast<Instruction>(TargetCB)) : nullptr;
+#else
   void update(const Function &F) {
     // Declarations don't affect analyses.
     if (F.isDeclaration())
       return;
+#endif
 
     hash(12345); // Function header
 
@@ -44,9 +123,18 @@ public:
     VisitedBBs.insert(BBs[0]);
     while (!BBs.empty()) {
       const BasicBlock *BB = BBs.pop_back_val();
+#if defined(ENABLE_AUTOTUNER)
+      hash(BLOCK_HEADER_HASH); // Block header
+      for (auto &Inst : *BB) {
+        hash(Inst.getOpcode());
+        if (I && Inst.isIdenticalTo(I))
+          return;
+      }
+#else
       hash(45798); // Block header
       for (auto &Inst : *BB)
         hash(Inst.getOpcode());
+#endif
 
       const Instruction *Term = BB->getTerminator();
       for (unsigned i = 0, e = Term->getNumSuccessors(); i != e; ++i) {
@@ -78,6 +166,32 @@ public:
 };
 
 } // namespace
+
+#if defined(ENABLE_AUTOTUNER)
+uint64_t llvm::StructuralHash(const MachineBasicBlock &MBB) {
+  StructuralHashImpl H;
+  H.update(MBB);
+  return H.getHash();
+}
+
+uint64_t llvm::StructuralHash(const std::vector<BasicBlock *> BBs) {
+  StructuralHashImpl H;
+  H.update(BBs);
+  return H.getHash();
+}
+
+uint64_t llvm::StructuralHash(const CallBase &CB) {
+  StructuralHashImpl H;
+  H.update(CB);
+  return H.getHash();
+}
+
+uint64_t llvm::StructuralHash(const SwitchInst &SI) {
+  StructuralHashImpl H;
+  H.update(SI);
+  return H.getHash();
+}
+#endif
 
 uint64_t llvm::StructuralHash(const Function &F) {
   StructuralHashImpl H;

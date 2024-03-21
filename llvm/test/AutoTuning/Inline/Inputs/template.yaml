@@ -1,0 +1,9 @@
+--- !AutoTuning
+Pass:            inline
+Name:            simpleFunction-entry
+Function:        bar
+CodeRegionType:  callsite
+CodeRegionHash:  5550568187071847048
+Args:
+  - ForceInline: [force-inline]
+...

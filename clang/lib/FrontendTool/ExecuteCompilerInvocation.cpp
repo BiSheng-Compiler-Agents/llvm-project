@@ -222,6 +222,33 @@ bool ExecuteCompilerInvocation(CompilerInstance *Clang) {
   // This should happen AFTER plugins have been loaded!
   if (!Clang->getFrontendOpts().LLVMArgs.empty()) {
     unsigned NumArgs = Clang->getFrontendOpts().LLVMArgs.size();
+#if defined(ENABLE_AUTOTUNER)
+    // Both incremental compilation (for AutoTuner) and 'opt-bisect-limit'
+    // changes the behavior of compilation pipeline. If incremental compilation
+    // is used along with 'opt-bisect-limit' then 'opt-bisect-limit' is
+    // preferred and incremental compilation is disabled.
+    unsigned BisectLimitFound = 0;
+    unsigned CompileModeFound = 0;
+    for (unsigned Idx = 0; Idx != NumArgs; ++Idx) {
+      if (Clang->getFrontendOpts().LLVMArgs[Idx].find("-opt-bisect-limit=") !=
+          std::string::npos)
+        BisectLimitFound = Idx;
+      if (Clang->getFrontendOpts().LLVMArgs[Idx].find(
+              "-auto-tuning-compile-mode=") != std::string::npos)
+        CompileModeFound = Idx;
+      if (BisectLimitFound && CompileModeFound)
+        break;
+    }
+    if (BisectLimitFound && CompileModeFound &&
+        Clang->getFrontendOpts().LLVMArgs[CompileModeFound].compare(
+            "-auto-tuning-compile-mode=Inactive") != 0) {
+      Clang->getFrontendOpts().LLVMArgs[CompileModeFound] =
+          "-auto-tuning-compile-mode=Inactive";
+      llvm::errs() << "AutoTunerCompile: Incremental compilation cannot work "
+                      "with '-opt-bisect-limit' flag.\n"
+                      "Disabling incremental compilation.\n";
+    }
+#endif
     auto Args = std::make_unique<const char*[]>(NumArgs + 2);
     Args[0] = "clang (LLVM option parsing)";
     for (unsigned i = 0; i != NumArgs; ++i)

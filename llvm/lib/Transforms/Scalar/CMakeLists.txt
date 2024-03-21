@@ -2,6 +2,7 @@ add_llvm_component_library(LLVMScalarOpts
   ADCE.cpp
   AlignmentFromAssumptions.cpp
   AnnotationRemarks.cpp
+  AutoTuningCompile.cpp
   BDCE.cpp
   CallSiteSplitting.cpp
   ConstantHoisting.cpp
@@ -92,6 +93,7 @@ add_llvm_component_library(LLVMScalarOpts
   LINK_COMPONENTS
   AggressiveInstCombine
   Analysis
+  AutoTuner
   Core
   InstCombine
   Support

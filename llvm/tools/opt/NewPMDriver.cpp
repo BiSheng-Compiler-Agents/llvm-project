@@ -39,6 +39,10 @@
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/Debugify.h"
 
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
+
 using namespace llvm;
 using namespace opt_tool;
 
@@ -459,6 +463,35 @@ bool llvm::runPassPipeline(
     MPM.addPass(NewPMDebugifyPass(DebugifyMode::OriginalDebugInfo, "",
                                   &DebugInfoBeforePass));
 
+#if defined(ENABLE_AUTOTUNER)
+  bool Changed = false;
+  // If autotuning is enabled (for applying configuration), use AutoTuner
+  // generated pass ordering instead of using passes specified with -passes=...
+  // with opt tool.
+  if (autotuning::Engine.isEnabled()) {
+    std::vector<std::string> PassesList;
+    Changed = autotuning::Engine.lookUpGlobalParams("OptPass", PassesList);
+    if (Changed && PassesList.size()) {
+      std::string PassPipeline = "";
+      for (auto PassName : PassesList)
+        PassPipeline.append(PassName + ",");
+      PassPipeline.pop_back();
+
+      if (auto Err = PB.parsePassPipeline(MPM, PassPipeline))
+        errs() << "AutoTuner: cannot add pass:" << toString(std::move(Err))
+               << "\n";
+    }
+  }
+  if (!Changed) {
+    // Add passes according to the -passes options.
+    if (!PassPipeline.empty()) {
+      if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
+        errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
+        return false;
+      }
+    }
+  }
+#else
   // Add passes according to the -passes options.
   if (!PassPipeline.empty()) {
     if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
@@ -466,6 +499,7 @@ bool llvm::runPassPipeline(
       return false;
     }
   }
+#endif
 
   if (VK > VK_NoVerifier)
     MPM.addPass(VerifierPass());
@@ -538,6 +572,14 @@ bool llvm::runPassPipeline(
 
   if (DebugifyEach && !DebugifyExport.empty())
     exportDebugifyStats(DebugifyExport, Debugify.getDebugifyStatsMap());
+
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - auto-tuning finalization for this module
+  if (Error E = autotuning::Engine.finalize()) {
+    errs() << "error: " << toString(std::move(E)) << '\n';
+    return false;
+  }
+#endif
 
   return true;
 }

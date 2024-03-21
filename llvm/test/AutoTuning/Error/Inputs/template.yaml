@@ -1,0 +1,10 @@
+--- !AutoTuning
+Pass:            pass
+Name:            for.body
+Function:        foo
+CodeRegionType:  loop
+CodeRegionHash:  0
+Args:
+  - UnrollCount: 2
+  - PassOrder: [test, test2]
+...

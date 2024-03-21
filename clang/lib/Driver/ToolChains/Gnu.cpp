@@ -678,6 +678,40 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_T);
 
+#if defined(ENABLE_AUTOTUNER)
+  // AutoTuner related features will only be enabled for LTO build during
+  // linking phase. Otherwise, non LTO build will require lld linker
+  // unnecessarily (other linkers do not support AutoTuner).
+  if (D.isUsingAutoTune() && D.isUsingLTO()) {
+    bool LinkerIsLLD = false;
+    (void) ToolChain.GetLinkerPath(&LinkerIsLLD);
+    // AutoTuner support is only available for LLD Linker.
+    if (!LinkerIsLLD)
+      D.Diag(clang::diag::err_drv_lto_without_lld);
+
+    bool IsThinLTO = D.getLTOMode() == LTOK_Thin;
+    if (!D.AutoTuneProjectDir.empty()) {
+      CmdArgs.push_back("-mllvm");
+      CmdArgs.push_back(Args.MakeArgString(Twine("-autotuning-project-dir=") +
+                                           D.AutoTuneProjectDir));
+    }
+    // Enable tuning of callsites cause all of the callsites will have local
+    // linkage during LTO and they are not tuned by default.
+    CmdArgs.push_back(Args.MakeArgString("-mllvm"));
+    CmdArgs.push_back(
+        Args.MakeArgString("-auto-tuning-enable-local-callsite-tuning=true"));
+    if (D.getAutoTuneMode() == AutoTuneKind::AutoTuneGenerate) {
+      AddAutoTuningOpportunities(Args, D, CmdArgs, IsThinLTO);
+    } else if (D.getAutoTuneMode() == AutoTuneKind::AutoTuneNext) {
+      AddAutoTuningInput(Args, D, CmdArgs);
+      if (IsThinLTO) {
+        CmdArgs.push_back("-mllvm");
+        CmdArgs.push_back("-autotuning-thin-lto=true");
+      }
+    }
+  }
+#endif
+
   const char *Exec = Args.MakeArgString(ToolChain.GetLinkerPath());
   C.addCommand(std::make_unique<Command>(JA, *this,
                                          ResponseFileSupport::AtFileCurCP(),

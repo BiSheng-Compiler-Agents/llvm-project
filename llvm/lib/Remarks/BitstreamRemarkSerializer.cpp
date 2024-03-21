@@ -277,6 +277,14 @@ void BitstreamRemarkSerializerHelper::emitRemarkBlock(const Remark &Remark,
   R.push_back(StrTab.add(Remark.RemarkName).first);
   R.push_back(StrTab.add(Remark.PassName).first);
   R.push_back(StrTab.add(Remark.FunctionName).first);
+#if defined(ENABLE_AUTOTUNER)
+  if (Remark.CodeRegionType)
+    R.push_back(StrTab.add(*Remark.CodeRegionType).first);
+  if (std::optional<uint64_t> hash = Remark.CodeRegionHash)
+    R.push_back(*hash);
+  if (std::optional<unsigned int> Invocation = Remark.Invocation)
+    R.push_back(*Invocation);
+#endif
   Bitstream.EmitRecordWithAbbrev(RecordRemarkHeaderAbbrevID, R);
 
   if (const std::optional<RemarkLocation> &Loc = Remark.Loc) {

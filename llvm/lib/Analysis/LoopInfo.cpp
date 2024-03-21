@@ -37,6 +37,10 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/GenericLoopInfoImpl.h"
 #include "llvm/Support/raw_ostream.h"
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#include "llvm/IR/StructuralHash.h"
+#endif
 using namespace llvm;
 
 // Explicitly instantiate methods in LoopInfoImpl.h for IR-level Loops.
@@ -662,6 +666,54 @@ Loop::LocRange Loop::getLocRange() const {
 
   return LocRange();
 }
+
+#if defined(ENABLE_AUTOTUNER)
+uint64_t Loop::computeStructuralHash() {
+  std::vector<BasicBlock *> BBs = getBlocks();
+  return StructuralHash(BBs);
+}
+
+void Loop::initCodeRegion() {
+  std::string LoopName;
+  // use the header's name as the loop name
+  if (BasicBlock *Header = getHeader()) {
+    if (Header->hasName()) {
+      LoopName = Header->getName().str();
+    }
+    // if the header doesn't have a name,
+    // use the label of this header from AsmWriter
+    else {
+      std::string Str;
+      llvm::raw_string_ostream RSO(Str);
+      Header->printAsOperand(RSO);
+      LoopName = RSO.str();
+    }
+  } else {
+    LoopName = "<unnamed loop>";
+  }
+
+  Function *F = this->getHeader()->getParent();
+  StringRef FuncName = F->getName();
+
+  // init the CodeRegion
+  autotuning::CodeRegion CR = autotuning::CodeRegion(
+      LoopName, FuncName.data(), autotuning::CodeRegionType::Loop,
+      this->getStartLoc());
+  // Compute the number of non-debug IR instructions in this loop.
+  unsigned TotalNumInstrs = 0;
+  for (const BasicBlock *BB : this->getBlocks()) {
+    unsigned NumInstrs = std::distance(BB->instructionsWithoutDebug().begin(),
+                                       BB->instructionsWithoutDebug().end());
+    TotalNumInstrs += NumInstrs;
+  }
+  CR.setSize(TotalNumInstrs);
+  // Compute hotness.
+  autotuning::HotnessType Hotness = F->ATEFunction.getHotness();
+  CR.setHotness(Hotness);
+
+  this->setCodeRegion(CR);
+}
+#endif
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void Loop::dump() const { print(dbgs()); }

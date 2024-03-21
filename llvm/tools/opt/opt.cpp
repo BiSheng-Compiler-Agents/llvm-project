@@ -456,6 +456,9 @@ int main(int argc, char **argv) {
   initializeWriteBitcodePassPass(Registry);
   initializeReplaceWithVeclibLegacyPass(Registry);
   initializeJMCInstrumenterPass(Registry);
+#if defined(ENABLE_AUTOTUNER)
+  initializeAutotuningDumpLegacyPass(Registry);
+#endif
 
   SmallVector<PassPlugin, 1> PluginList;
   PassPlugins.setCallback([&](const std::string &PluginPath) {
@@ -516,7 +519,11 @@ int main(int argc, char **argv) {
                                    RemarksFormat, RemarksWithHotness,
                                    RemarksHotnessThreshold);
   if (Error E = RemarksFileOrErr.takeError()) {
+#if defined(ENABLE_AUTOTUNER)
+    errs() << "error: " << toString(std::move(E)) << '\n';
+#else
     errs() << toString(std::move(E)) << '\n';
+#endif
     return 1;
   }
   std::unique_ptr<ToolOutputFile> RemarksFile = std::move(*RemarksFileOrErr);
@@ -640,6 +647,20 @@ int main(int argc, char **argv) {
     if (UnifiedLTO)
       M->addModuleFlag(Module::Error, "UnifiedLTO", 1);
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - auto-tuning initialization for this module
+  // if the auto-tuning flag is on
+  if (Error E = autotuning::Engine.init(M->getModuleIdentifier())) {
+    errs() << "error: " << toString(std::move(E)) << '\n';
+    return 1;
+  }
+  if (autotuning::Engine.isEnabled() && autotuning::Engine.isParseInput() &&
+      (autotuning::Engine.LLVMParams.size() ||
+       autotuning::Engine.ProgramParams.size()))
+    llvm::cl::ParseAutoTunerOptions(autotuning::Engine.LLVMParams,
+                                    autotuning::Engine.ProgramParams);
+#endif
 
   // Add an appropriate TargetLibraryInfo pass for the module's triple.
   TargetLibraryInfoImpl TLII(ModuleTriple);
@@ -778,6 +799,30 @@ int main(int argc, char **argv) {
     Passes.add(TPC);
   }
 
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - If auto-tuning is enabled, try to generate passes
+  // from auto-tuning interface and disable all optimization passes.
+  if (autotuning::Engine.isEnabled()) {
+    std::vector<std::string> PassesList;
+    bool Changed = autotuning::Engine.lookUpGlobalParams("OptPass", PassesList);
+    if (Changed) {
+      // disable all optimization passes of all optimization levels
+      OptLevelO0 = false;
+      OptLevelO1 = false;
+      OptLevelO2 = false;
+      OptLevelOs = false;
+      OptLevelOz = false;
+      OptLevelO3 = false;
+      for (auto const &Value : PassesList) {
+        const PassInfo *PassInf = (Registry.getPassInfo(StringRef(Value)));
+        if (PassInf) {
+          PassList.push_back(PassInf);
+        }
+      }
+    }
+  }
+#endif
+
   // Create a new optimization pass for each one specified on the command line
   for (unsigned i = 0; i < PassList.size(); ++i) {
     const PassInfo *PassInf = PassList[i];
@@ -877,6 +922,14 @@ int main(int argc, char **argv) {
 
   if (DebugifyEach && !DebugifyExport.empty())
     exportDebugifyStats(DebugifyExport, Passes.getDebugifyStatsMap());
+
+#if defined(ENABLE_AUTOTUNER)
+  // AUTO-TUNING - auto-tuning finalization for this module
+  if (Error E = autotuning::Engine.finalize()) {
+    errs() << "error: " << toString(std::move(E)) << '\n';
+    return 1;
+  }
+#endif
 
   // Declare success.
   if (!NoOutput)

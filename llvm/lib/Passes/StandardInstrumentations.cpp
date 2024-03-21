@@ -41,6 +41,10 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#include "llvm/Transforms/Scalar/AutoTuningCompile.h"
+#endif
 
 using namespace llvm;
 
@@ -106,6 +110,10 @@ static cl::opt<bool> PrintOnCrash(
     "print-on-crash",
     cl::desc("Print the last form of the IR before crash (use -print-on-crash-path to dump to a file)"),
     cl::Hidden);
+
+#if defined(ENABLE_AUTOTUNER)
+extern cl::opt<AutoTuningCompileOpt> AutoTuningCompileMode;
+#endif
 
 static cl::opt<std::string> OptBisectPrintIRPath(
     "opt-bisect-print-ir-path",
@@ -874,6 +882,21 @@ bool OptPassGateInstrumentation::shouldRun(StringRef PassName, Any IR) {
 
 void OptPassGateInstrumentation::registerCallbacks(
     PassInstrumentationCallbacks &PIC) {
+#if defined(ENABLE_AUTOTUNER)
+  // Using AutoTuner OptBisect to change the behavior of compilation pipeline.
+  // Flag 'opt-bisect-limit' will be preferred if both 'opt-bisect-limit' and
+  // incremental compilation flags are used.
+  if (autotuning::Engine.isParseInput() && AutoTuningCompileMode) {
+    if (!getAutoTuningOptPassGate().isEnabled())
+      return;
+
+    PIC.registerShouldRunOptionalPassCallback([](StringRef PassID, Any IR) {
+      return isIgnored(PassID) ||
+             getAutoTuningOptPassGate().checkPass(PassID, getIRName(IR));
+    });
+    return;
+  }
+#endif
   OptPassGate &PassGate = Context.getOptPassGate();
   if (!PassGate.isEnabled())
     return;

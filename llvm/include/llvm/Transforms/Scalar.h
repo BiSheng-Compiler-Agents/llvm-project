@@ -16,6 +16,10 @@
 
 #include "llvm/Transforms/Utils/SimplifyCFGOptions.h"
 #include <functional>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/Pass.h"
+#include <string>
+#endif
 
 namespace llvm {
 
@@ -299,6 +303,19 @@ Pass *createLoopSimplifyCFGPass();
 //
 FunctionPass *createInstSimplifyLegacyPass();
 
+#if defined(ENABLE_AUTOTUNER)
+//===--------------------------------------------------------------------===//
+//
+// createAutotuningCompilePass - It writes IR files with -fautotune-generate
+// for autotuning flow. It also enables/disables the execution of optimization
+// passes in subsequent compilations (with -fautotune) based on autotuning
+// methodology and available opportunities.
+//
+FunctionPass *
+createAutoTuningCompileFunctionLegacyPass(std::string Pass = "unknown");
+ModulePass *
+createAutoTuningCompileModuleLegacyPass(std::string Pass = "unknown");
+#endif
 
 //===----------------------------------------------------------------------===//
 //

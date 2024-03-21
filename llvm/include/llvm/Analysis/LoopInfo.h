@@ -26,6 +26,9 @@
 #include <algorithm>
 #include <optional>
 #include <utility>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 namespace llvm {
 
@@ -44,7 +47,12 @@ extern template class LoopBase<BasicBlock, Loop>;
 
 /// Represents a single loop in the control flow graph.  Note that not all SCCs
 /// in the CFG are necessarily loops.
+#if defined(ENABLE_AUTOTUNER)
+class LLVM_EXTERNAL_VISIBILITY Loop : public LoopBase<BasicBlock, Loop>,
+                                      public autotuning::Container {
+#else
 class LLVM_EXTERNAL_VISIBILITY Loop : public LoopBase<BasicBlock, Loop> {
+#endif
 public:
   /// A range representing the start and end location of a loop.
   class LocRange {
@@ -394,6 +402,11 @@ public:
         return Header->getName();
     return "<unnamed loop>";
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  void initCodeRegion() override;
+  uint64_t computeStructuralHash() override;
+#endif
 
 private:
   Loop() = default;

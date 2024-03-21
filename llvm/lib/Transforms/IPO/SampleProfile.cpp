@@ -1212,6 +1212,20 @@ bool SampleProfileLoader::inlineHotFunctions(
             }
           }
         }
+#if defined(ENABLE_AUTOTUNER)
+        if (autotuning::Engine.isEnabled()) {
+          // If a callsite is hot/cold, mark its corresponding callee as
+          // hot/cold respectively so that auto-tuning engine will be able to
+          // selectively dump code regions as tuning opportunities.
+          if (const CallInst *CI = dyn_cast<CallInst>(&I))
+            if (Function *Callee = CI->getCalledFunction()) {
+              if (callsiteIsHot(FS, PSI, ProfAccForSymsInList))
+                Callee->getATEFunction().setHot();
+              else
+                Callee->getATEFunction().setCold();
+            }
+        }
+#endif
       }
       if (Hot || ExternalInlineAdvisor) {
         CIS.insert(CIS.begin(), AllCandidates.begin(), AllCandidates.end());

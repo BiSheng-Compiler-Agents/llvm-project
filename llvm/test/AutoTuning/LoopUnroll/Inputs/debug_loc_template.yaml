@@ -1,0 +1,10 @@
+--- !AutoTuning
+Pass:            loop-unroll
+Name:            for.cond
+DebugLoc:        { File: loop-opp.c, Line: 4, Column: 5 }
+Function:        foo
+CodeRegionType:  loop
+Args:
+  - UnrollCount: [number]
+Invocation:      0
+...

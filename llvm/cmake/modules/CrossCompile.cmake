@@ -82,6 +82,7 @@ function(llvm_create_cross_target project_name target_name toolchain buildtype)
         -DLLVM_ENABLE_PROJECTS="${llvm_enable_projects_arg}"
         -DLLVM_EXTERNAL_PROJECTS="${llvm_external_projects_arg}"
         -DLLVM_ENABLE_RUNTIMES="${llvm_enable_runtimes_arg}"
+        -DLLVM_ENABLE_AUTOTUNER="${LLVM_ENABLE_AUTOTUNER}"
         ${external_project_source_dirs}
         -DLLVM_TEMPORARILY_ALLOW_OLD_TOOLCHAIN="${LLVM_TEMPORARILY_ALLOW_OLD_TOOLCHAIN}"
         -DLLVM_INCLUDE_BENCHMARKS=OFF

@@ -3287,6 +3287,23 @@ struct OperandTraits<BranchInst> : public VariadicOperandTraits<BranchInst, 1> {
 
 DEFINE_TRANSPARENT_OPERAND_ACCESSORS(BranchInst, Value)
 
+#if defined(ENABLE_AUTOTUNER)
+//===----------------------------------------------------------------------===//
+//                    AutoTuningEnabledSwitchInst Class
+//===----------------------------------------------------------------------===//
+class SwitchInst;
+
+class AutoTuningEnabledSwitchInst : public autotuning::Container {
+public:
+  AutoTuningEnabledSwitchInst() = delete;
+  void initCodeRegion() override;
+  uint64_t computeStructuralHash() override;
+  AutoTuningEnabledSwitchInst(SwitchInst *SwitchInst) { SI = SwitchInst; }
+
+private:
+  SwitchInst *SI;
+};
+#endif
 //===----------------------------------------------------------------------===//
 //                               SwitchInst Class
 //===----------------------------------------------------------------------===//
@@ -3331,6 +3348,13 @@ protected:
 
 public:
   void operator delete(void *Ptr) { User::operator delete(Ptr); }
+
+#if defined(ENABLE_AUTOTUNER)
+  // There is one-to-one correspondence between ATESwitchInst and
+  // SwitchInst class to enable AutoTuner.
+  std::unique_ptr<AutoTuningEnabledSwitchInst> ATESwitchInst =
+      std::make_unique<AutoTuningEnabledSwitchInst>(this);
+#endif
 
   // -2
   static const unsigned DefaultPseudoIndex = static_cast<unsigned>(~0L-1);

@@ -69,6 +69,9 @@
 #include <numeric>
 #include <type_traits>
 #include <vector>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 namespace llvm {
 class DataLayout;

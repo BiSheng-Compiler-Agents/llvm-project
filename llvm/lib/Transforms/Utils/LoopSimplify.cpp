@@ -69,6 +69,9 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 using namespace llvm;
 
 #define DEBUG_TYPE "loop-simplify"
@@ -793,6 +796,11 @@ Pass *llvm::createLoopSimplifyPass() { return new LoopSimplify(); }
 /// it in any convenient order) inserting preheaders...
 ///
 bool LoopSimplify::runOnFunction(Function &F) {
+#if defined(ENABLE_AUTOTUNER)
+  if (autotuning::Engine.isEnabled() && skipFunction(F))
+    return false;
+#endif
+
   bool Changed = false;
   LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   DominatorTree *DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();

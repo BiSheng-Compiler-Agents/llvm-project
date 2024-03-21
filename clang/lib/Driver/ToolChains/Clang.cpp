@@ -5877,6 +5877,27 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Triple.isNVPTX() && !Triple.isAMDGCN())
     addPGOAndCoverageFlags(TC, C, JA, Output, Args, SanitizeArgs, CmdArgs);
 
+#if defined(ENABLE_AUTOTUNER)
+  // Add Auto-tuning options.
+  if (C.getDriver().isUsingAutoTune()) {
+    Arg *A = Args.getLastArg(options::OPT_O_Group);
+    if (!A || A->getOption().matches(options::OPT_O0))
+      D.Diag(clang::diag::err_drv_autotune_disabled_O0);
+
+    // Enable debug info when Auto-tuning options are specified.
+    CmdArgs.push_back("-debug-info-kind=line-tables-only");
+    if (!D.AutoTuneProjectDir.empty()) {
+      CmdArgs.push_back("-mllvm");
+      CmdArgs.push_back(Args.MakeArgString(Twine("-autotuning-project-dir=") +
+                                           D.AutoTuneProjectDir));
+    }
+    if (D.getAutoTuneMode() == AutoTuneKind::AutoTuneGenerate)
+      AddAutoTuningOpportunities(Args, D, CmdArgs);
+    else if (D.getAutoTuneMode() == AutoTuneKind::AutoTuneNext)
+      AddAutoTuningInput(Args, D, CmdArgs);
+  }
+#endif
+
   Args.AddLastArg(CmdArgs, options::OPT_fclang_abi_compat_EQ);
 
   if (getLastProfileSampleUseArg(Args) &&

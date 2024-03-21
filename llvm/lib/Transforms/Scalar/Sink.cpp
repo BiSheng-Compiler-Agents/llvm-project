@@ -248,6 +248,11 @@ namespace {
     }
 
     bool runOnFunction(Function &F) override {
+#if defined(ENABLE_AUTOTUNER)
+      if (skipFunction(F))
+        return false;
+#endif
+
       auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
       auto &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
       auto &AA = getAnalysis<AAResultsWrapperPass>().getAAResults();

@@ -127,6 +127,9 @@ static inline bool isPrefixedOrGrouping(const Option *O) {
          O->getFormattingFlag() == cl::AlwaysPrefix;
 }
 
+#if defined(ENABLE_AUTOTUNER)
+#include <map>
+#endif
 
 namespace {
 
@@ -1469,6 +1472,44 @@ bool cl::ParseCommandLineOptions(int argc, const char *const *argv,
   return GlobalParser->ParseCommandLineOptions(NewArgc, &NewArgv[0], Overview,
                                                Errs, LongOptionsUseDoubleDash);
 }
+
+#if defined(ENABLE_AUTOTUNER)
+bool cl::ParseAutoTunerOptions(
+    std::unordered_map<std::string, std::string> LLVMParams,
+    std::unordered_map<std::string, std::string> ProgramParams,
+    StringRef Overview, raw_ostream *Errs, const char *EnvVar,
+    bool LongOptionsUseDoubleDash) {
+  SmallVector<const char *, 20> NewArgv;
+  BumpPtrAllocator A;
+  StringSaver Saver(A);
+  // GlobalParser requires arguments similar to C style command line options
+  // (int argc, char * argv[]) where argv[0] refers to the program name.
+  // We are using a fake program name here which is consistent with LLVM.
+  NewArgv.push_back("AutoTuner (LLVM option parsing)");
+
+  for (const auto &I : LLVMParams) {
+    std::string NewOption = I.first + "=" + I.second;
+    NewArgv.push_back(Saver.save(NewOption).data());
+  }
+
+  for (const auto &I : ProgramParams) {
+    std::string NewOption = I.first + "=" + I.second;
+    NewArgv.push_back(Saver.save(NewOption).data());
+  }
+
+  // Parse options from environment variable.
+  if (EnvVar) {
+    if (std::optional<std::string> EnvValue =
+            sys::Process::GetEnv(StringRef(EnvVar)))
+      TokenizeGNUCommandLine(*EnvValue, Saver, NewArgv);
+  }
+
+  int NewArgc = static_cast<int>(NewArgv.size());
+  // Parse all options.
+  return GlobalParser->ParseCommandLineOptions(NewArgc, &NewArgv[0], Overview,
+                                               Errs, LongOptionsUseDoubleDash);
+}
+#endif
 
 /// Reset all options at least once, so that we can parse different options.
 void CommandLineParser::ResetAllOptionOccurrences() {

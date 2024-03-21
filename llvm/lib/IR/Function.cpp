@@ -69,6 +69,10 @@
 #include <cstring>
 #include <string>
 
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/IR/StructuralHash.h"
+#endif
+
 using namespace llvm;
 using ProfileCount = Function::ProfileCount;
 
@@ -1975,6 +1979,36 @@ std::optional<StringRef> Function::getSectionPrefix() const {
   }
   return std::nullopt;
 }
+
+#if defined(ENABLE_AUTOTUNER)
+uint64_t AutoTuningEnabledFunction::computeStructuralHash() {
+  return StructuralHash(*(this->Func));
+}
+
+void AutoTuningEnabledFunction::initCodeRegion() {
+  StringRef FuncName = Func->getName();
+  StringRef EntryBBName;
+  autotuning::SourceLocation Loc;
+
+  if (!Func->empty())
+    EntryBBName = Func->front().getName();
+  else
+    EntryBBName = StringRef("None");
+
+  DISubprogram *SubProgram = Func->getSubprogram();
+  if (SubProgram)
+    // Set the column number to 0 because there is no information about
+    // column number for functions.
+    Loc = {SubProgram->getFilename().str(), SubProgram->getLine(), 0};
+
+  autotuning::CodeRegion CR =
+      autotuning::CodeRegion(EntryBBName.data(), FuncName.data(),
+                             autotuning::CodeRegionType::Function, Loc);
+  CR.setSize(Func->getInstructionCount());
+  CR.setHotness(this->getHotness());
+  this->setCodeRegion(CR);
+}
+#endif
 
 bool Function::nullPointerIsDefined() const {
   return hasFnAttribute(Attribute::NullPointerIsValid);

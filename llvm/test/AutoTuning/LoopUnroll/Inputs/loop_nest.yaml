@@ -1,0 +1,10 @@
+# CodeRegionHash is correct for only first code region only. 
+!AutoTuning {Args: [{UnrollCount: 2}], CodeRegionHash: 8456922293277663707, CodeRegionType: loop,
+  DebugLoc: {Column: 8, File: loop-nest.c, Line: 10}, Function: loop_nest, Invocation: 0,
+  Name: for.body6.us, Pass: loop-unroll}
+--- !AutoTuning {Args: [{UnrollCount: 4}], CodeRegionHash: 8456922293277663707, CodeRegionType: loop,
+  DebugLoc: {Column: 5, File: loop-nest.c, Line: 9}, Function: loop_nest, Invocation: 0,
+  Name: for.cond4.preheader.us, Pass: loop-unroll}
+--- !AutoTuning {Args: [{UnrollCount: 4}], CodeRegionHash: 8456922293277663707, CodeRegionType: loop,
+  DebugLoc: {Column: 3, File: loop-nest.c, Line: 8}, Function: loop_nest, Invocation: 0,
+  Name: for.cond1.preheader, Pass: loop-unroll}

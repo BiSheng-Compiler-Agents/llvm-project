@@ -1,0 +1,9 @@
+--- !AutoTuning
+Pass:            pass-name
+Name:            opp-name
+Function:        func
+CodeRegionType:  [type]
+CodeRegionHash:  4250615281180658289
+Args:
+  - DummyOption: true
+...

@@ -162,6 +162,14 @@ static cl::opt<bool> DisableGEPConstOperand(
     "disable-gep-const-evaluation", cl::Hidden, cl::init(false),
     cl::desc("Disables evaluation of GetElementPtr with constant operands"));
 
+#if defined(ENABLE_AUTOTUNER)
+static cl::opt<bool>
+    EnableLocalCallSiteTuning("auto-tuning-enable-local-callsite-tuning",
+                              cl::init(false), cl::Hidden,
+                              cl::desc("Enable AutoTuning for local callsites "
+                                       "as well."));
+#endif
+
 namespace llvm {
 std::optional<int> getStringFnAttrAsInt(const Attribute &Attr) {
   if (Attr.isValid()) {
@@ -2989,6 +2997,27 @@ InlineCost llvm::getInlineCost(
       return llvm::InlineCost::getAlways("always inline attribute");
     return llvm::InlineCost::getNever(UserDecision->getFailureReason());
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  if (autotuning::Engine.isEnabled() && Call.getCaller() &&
+      (!Callee->hasLocalLinkage() || EnableLocalCallSiteTuning)) {
+    bool ForceInline = false;
+    bool Found = false;
+
+    autotuning::Engine.initContainer(Call.ATECallSite.get(), "inline",
+                                     Call.getCaller()->getName(),
+                                     /* addOpportunity */ false);
+
+    Found = Call.ATECallSite->lookUpParams<bool>("ForceInline", ForceInline);
+
+    if (Found) {
+      if (ForceInline)
+        return llvm::InlineCost::getAlways("Force inlined by auto-tuning");
+      else
+        return llvm::InlineCost::getNever("Force non-inlined by auto-tuning");
+    }
+  }
+#endif
 
   LLVM_DEBUG(llvm::dbgs() << "      Analyzing call of " << Callee->getName()
                           << "... (caller:" << Call.getCaller()->getName()

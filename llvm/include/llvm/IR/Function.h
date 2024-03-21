@@ -37,6 +37,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 namespace llvm {
 
@@ -56,6 +59,24 @@ class User;
 class BranchProbabilityInfo;
 class BlockFrequencyInfo;
 
+#if defined(ENABLE_AUTOTUNER)
+class AutoTuningEnabledFunction : public autotuning::Container {
+public:
+  AutoTuningEnabledFunction() = delete;
+  void initCodeRegion() override;
+  void setHot() { this->Hotness = autotuning::Hot; }
+  void setCold() { this->Hotness = autotuning::Cold; }
+  autotuning::HotnessType getHotness() const { return this->Hotness; }
+  uint64_t computeStructuralHash() override;
+
+private:
+  AutoTuningEnabledFunction(Function *F) { Func = F; };
+  Function *Func;
+  autotuning::HotnessType Hotness = autotuning::Unknown;
+  friend class Function;
+};
+#endif
+
 class LLVM_EXTERNAL_VISIBILITY Function : public GlobalObject,
                                           public ilist_node<Function> {
 public:
@@ -67,6 +88,13 @@ public:
 
   using arg_iterator = Argument *;
   using const_arg_iterator = const Argument *;
+
+#if defined(ENABLE_AUTOTUNER)
+  // There is one-to-one correspondence between ATEFunction and the current
+  // Function object to avoid messing up the LLVM User and owned Use classes'
+  // memory layout.
+  AutoTuningEnabledFunction ATEFunction = AutoTuningEnabledFunction(this);
+#endif
 
 private:
   // Important things that make up a function!
@@ -127,6 +155,11 @@ public:
   Function(const Function&) = delete;
   void operator=(const Function&) = delete;
   ~Function();
+
+#if defined(ENABLE_AUTOTUNER)
+  // Return the auto-tuning enabled version of this Function object.
+  AutoTuningEnabledFunction &getATEFunction() { return ATEFunction; }
+#endif
 
   // This is here to help easily convert from FunctionT * (Function * or
   // MachineFunction *) in BlockFrequencyInfoImpl to Function * by calling
@@ -840,7 +873,11 @@ public:
   /// AssemblyAnnotationWriter.
   void print(raw_ostream &OS, AssemblyAnnotationWriter *AAW = nullptr,
              bool ShouldPreserveUseListOrder = false,
+#if defined(ENABLE_AUTOTUNER)
+             bool IsForDebug = false, bool PrintCompleteIR = false) const;
+#else
              bool IsForDebug = false) const;
+#endif
 
   /// viewCFG - This function is meant for use from the debugger.  You can just
   /// say 'call F->viewCFG()' and a ghostview window should pop up from the

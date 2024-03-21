@@ -37,6 +37,9 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include <algorithm>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/IR/StructuralHash.h"
+#endif
 #include <cmath>
 using namespace llvm;
 
@@ -1702,6 +1705,39 @@ MachineBasicBlock::livein_iterator MachineBasicBlock::livein_begin() const {
       "Liveness information is accurate");
   return LiveIns.begin();
 }
+
+#if defined(ENABLE_AUTOTUNER)
+uint64_t MachineBasicBlock::computeStructuralHash() {
+  return StructuralHash(*this);
+}
+
+void MachineBasicBlock::initCodeRegion() {
+  std::string BasicBlockName =
+      ("%bb." + Twine(this->getNumber()) + ":" + this->getName()).str();
+  MachineFunction *MF = this->getParent();
+  StringRef FuncName = MF->getName();
+
+  autotuning::CodeRegion CR;
+  if (!this->empty()) {
+    const DebugLoc &StartLoc = this->front().getDebugLoc();
+    CR = autotuning::CodeRegion(BasicBlockName, FuncName.data(),
+                                autotuning::CodeRegionType::MachineBasicBlock,
+                                StartLoc);
+  } else {
+    CR = autotuning::CodeRegion(BasicBlockName, FuncName.data(),
+                                autotuning::CodeRegionType::MachineBasicBlock);
+  }
+  // Compute the number of non-debug IR instructions in this MBB.
+  unsigned NumInstrs = std::distance(this->getFirstNonDebugInstr(),
+                                     this->getLastNonDebugInstr());
+  CR.setSize(NumInstrs);
+  // Compute hotness.
+  autotuning::HotnessType Hotness = MF->getFunction().ATEFunction.getHotness();
+  CR.setHotness(Hotness);
+
+  this->setCodeRegion(CR);
+}
+#endif
 
 MachineBasicBlock::liveout_iterator MachineBasicBlock::liveout_begin() const {
   const MachineFunction &MF = *getParent();

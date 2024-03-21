@@ -66,6 +66,9 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 using namespace llvm;
 
@@ -172,6 +175,10 @@ static cl::opt<unsigned>
                            cl::Hidden,
                            cl::desc("Default threshold (max size of unrolled "
                                     "loop), used in all but O3 optimizations"));
+
+#if defined(ENABLE_AUTOTUNER)
+static const std::string UnrollCountParamStr = "UnrollCount";
+#endif
 
 /// A magic value for use with the Threshold parameter to indicate
 /// that the loop unroll should be performed regardless of how much
@@ -893,7 +900,12 @@ bool llvm::computeUnrollCount(
     OptimizationRemarkEmitter *ORE, unsigned TripCount, unsigned MaxTripCount,
     bool MaxOrZero, unsigned TripMultiple, unsigned LoopSize,
     TargetTransformInfo::UnrollingPreferences &UP,
+#if defined(ENABLE_AUTOTUNER)
+    TargetTransformInfo::PeelingPreferences &PP, bool &UseUpperBound,
+    unsigned int Invocation) {
+#else
     TargetTransformInfo::PeelingPreferences &PP, bool &UseUpperBound) {
+#endif
 
   UnrollCostEstimator UCE(*L, LoopSize);
 
@@ -941,6 +953,43 @@ bool llvm::computeUnrollCount(
           std::max<unsigned>(UP.PartialThreshold, PragmaUnrollThreshold);
     }
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  // Priority 2.5 is using Unroll Count set by AutoTuner (if enabled).
+  if (autotuning::Engine.isEnabled()) {
+    // Create a code region for current loop. This code region will be added to
+    // opportunity list once all the relevant information is gathered.
+    autotuning::Engine.initContainer(L, DEBUG_TYPE,
+                                     L->getHeader()->getParent()->getName(),
+                                     /* addOpportunity */ false, Invocation);
+
+    int NewValue = 0; // the int value is set by lookUpParams()
+    bool UnrollCountChanged = L->lookUpParams<int>("UnrollCount", NewValue);
+
+    if (UnrollCountChanged) {
+      // Setting the UP.Count with the value suggested by AutoTuner.
+      // AutoTuner will use UnrollCount = 0, 1, X, Y, Z in case of dynamic
+      // configuration and UnrollCount = 0, 1, 2, 4, 8 otherwise to find
+      // optimal configuration. Compiler will unroll the loop with suggested
+      // UnrollCount except when UnrollCount = 1 where AutoTuner is suggesting
+      // to try loop peeling.
+      UP.Count = NewValue;
+      UP.AllowExpensiveTripCount = true;
+      UP.Force = true;
+      UP.Runtime = true;
+      if (!UP.AllowRemainder && UP.Count != 1)
+        UP.Count = 0;
+
+      // Check for Loop Peeling
+      if (UP.Count == 1) {
+        computePeelCount(L, LoopSize, PP, TripCount, DT, SE, AC, UP.Threshold);
+        UP.Runtime = (PP.PeelCount) ? false : UP.Runtime;
+      }
+
+      return true;
+    }
+  }
+#endif
 
   // 3rd priority is exact full unrolling.  This will eliminate all copies
   // of some exit test.
@@ -1119,6 +1168,59 @@ bool llvm::computeUnrollCount(
   return ExplicitUnroll;
 }
 
+#if defined(ENABLE_AUTOTUNER)
+// Given UnrollingPreferences count (UPCount) and TripCount for CodeRegion
+// CR, compute the dynamic Unroll values for tuning and add it to CR.
+static void
+computeAutoTunerDynamicUnrollOptions(unsigned UPCount, unsigned TripCount,
+                                     const autotuning::CodeRegion &CR) {
+  std::vector<unsigned int> DynamicTuningOptions;
+  unsigned int PotentialTuningOptions[2];
+  unsigned int Idx = 0;
+  int Count = -1;
+  unsigned int CurrentOption = 2;
+  unsigned int MaxTuningCount = 64;
+  DynamicTuningOptions.push_back(0);
+  // Add LoopPeeling as an additional option.
+  DynamicTuningOptions.push_back(1);
+  if (!UPCount) {
+    TripCount = (TripCount > MaxTuningCount) ? MaxTuningCount : TripCount;
+    unsigned int Limit = (TripCount == 0) ? 8 : TripCount;
+    DynamicTuningOptions.push_back(TripCount ? TripCount : 8);
+    while (CurrentOption < Limit) {
+      PotentialTuningOptions[Idx] = CurrentOption;
+      CurrentOption *= 2;
+      Idx = (Idx + 1) % 2;
+      ++Count;
+    }
+  } else {
+    while (CurrentOption < UPCount) {
+      PotentialTuningOptions[Idx] = CurrentOption;
+      CurrentOption *= 2;
+      Idx = (Idx + 1) % 2;
+      ++Count;
+    }
+    if (TripCount != UPCount) {
+      if (CurrentOption == UPCount) {
+        CurrentOption *= 2;
+      }
+      if (!TripCount || CurrentOption < TripCount) {
+        PotentialTuningOptions[Idx] = CurrentOption;
+        ++Count;
+      }
+    }
+    if (UPCount != 1)
+      DynamicTuningOptions.push_back(UPCount);
+  }
+
+  Count = std::min(1, Count);
+  while (Count >= 0)
+    DynamicTuningOptions.push_back(PotentialTuningOptions[Count--]);
+
+  CR.addAutoTunerOptions("UnrollCount", DynamicTuningOptions);
+}
+#endif
+
 static LoopUnrollResult
 tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
                 const TargetTransformInfo &TTI, AssumptionCache &AC,
@@ -1132,7 +1234,12 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
                 std::optional<bool> ProvidedUpperBound,
                 std::optional<bool> ProvidedAllowPeeling,
                 std::optional<bool> ProvidedAllowProfileBasedPeeling,
+#if defined(ENABLE_AUTOTUNER)
+                std::optional<unsigned> ProvidedFullUnrollMaxCount,
+                unsigned int Invocation = 0) {
+#else
                 std::optional<unsigned> ProvidedFullUnrollMaxCount) {
+#endif
 
   LLVM_DEBUG(dbgs() << "Loop Unroll: F["
                     << L->getHeader()->getParent()->getName() << "] Loop %"
@@ -1276,11 +1383,28 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   // computeUnrollCount() decides whether it is beneficial to use upper bound to
   // fully unroll the loop.
   bool UseUpperBound = false;
+
+#if defined(ENABLE_AUTOTUNER)
+  bool IsCountSetExplicitly = computeUnrollCount(
+      L, TTI, DT, LI, &AC, SE, EphValues, &ORE, TripCount, MaxTripCount,
+      MaxOrZero, TripMultiple, LoopSize, UP, PP, UseUpperBound, Invocation);
+  const autotuning::CodeRegion CR = L->getCodeRegion();
+  // computeAutoTunerDynamicUnrollOptions() adds the dynamic Unroll values to
+  // the CodeRegion.
+  computeAutoTunerDynamicUnrollOptions(UP.Count, TripCount, CR);
+
+  if (!UP.Count) {
+    autotuning::Engine.addOpportunity(
+        CR, {{UnrollCountParamStr, std::to_string(UP.Count)}});
+    return LoopUnrollResult::Unmodified;
+  }
+#else
   bool IsCountSetExplicitly = computeUnrollCount(
     L, TTI, DT, LI, &AC, SE, EphValues, &ORE, TripCount, MaxTripCount, MaxOrZero,
       TripMultiple, LoopSize, UP, PP, UseUpperBound);
   if (!UP.Count)
     return LoopUnrollResult::Unmodified;
+#endif
 
   if (PP.PeelCount) {
     assert(UP.Count == 1 && "Cannot perform peel and unroll in the same step");
@@ -1300,8 +1424,16 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
       // we had, so we don't want to unroll or peel again.
       if (PP.PeelProfiledIterations)
         L->setLoopAlreadyUnrolled();
+#if defined(ENABLE_AUTOTUNER)
+      autotuning::Engine.addOpportunity(
+          CR, {{UnrollCountParamStr, std::to_string(UP.Count)}});
       return LoopUnrollResult::PartiallyUnrolled;
     }
+    autotuning::Engine.addOpportunity(CR, {{UnrollCountParamStr, "0"}});
+#else
+      return LoopUnrollResult::PartiallyUnrolled;
+    }
+#endif
     return LoopUnrollResult::Unmodified;
   }
 
@@ -1329,8 +1461,18 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
       {UP.Count, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
        UP.UnrollRemainder, ForgetAllSCEV},
       LI, &SE, &DT, &AC, &TTI, &ORE, PreserveLCSSA, &RemainderLoop);
+
+#if defined(ENABLE_AUTOTUNER)
+  if (UnrollResult == LoopUnrollResult::Unmodified) {
+    autotuning::Engine.addOpportunity(CR, {{UnrollCountParamStr, "0"}});
+    return LoopUnrollResult::Unmodified;
+  }
+  autotuning::Engine.addOpportunity(
+      CR, {{UnrollCountParamStr, std::to_string(UP.Count)}});
+#else
   if (UnrollResult == LoopUnrollResult::Unmodified)
     return LoopUnrollResult::Unmodified;
+#endif
 
   if (RemainderLoop) {
     std::optional<MDNode *> RemainderLoopID =
@@ -1379,6 +1521,20 @@ public:
   /// Otherwise, forgetAllLoops and rebuild when needed next.
   bool ForgetAllSCEV;
 
+#if defined(ENABLE_AUTOTUNER)
+private:
+  // 'InvocationCounter' keeps track of Invocation of Loop Unroll Pass and
+  // assign it to 'Invocation'. So each LoopUnroll Object knows when it is
+  // being invoked during optimization pipeline. It is used to identify the
+  // Invocation of a pass if it is invoked multiple times. AutoTuner will use
+  // this information to generate the Code Regions and apply the suggested
+  // configuration during the correct invocation of the Loop Unroll Pass.
+  static unsigned int InvocationCounter;
+  unsigned int Invocation;
+
+public:
+#endif
+
   std::optional<unsigned> ProvidedCount;
   std::optional<unsigned> ProvidedThreshold;
   std::optional<bool> ProvidedAllowPartial;
@@ -1405,6 +1561,9 @@ public:
         ProvidedAllowPeeling(AllowPeeling),
         ProvidedAllowProfileBasedPeeling(AllowProfileBasedPeeling),
         ProvidedFullUnrollMaxCount(ProvidedFullUnrollMaxCount) {
+#if defined(ENABLE_AUTOTUNER)
+    Invocation = InvocationCounter++;
+#endif
     initializeLoopUnrollPass(*PassRegistry::getPassRegistry());
   }
 
@@ -1431,7 +1590,12 @@ public:
         /*OnlyFullUnroll*/ false, OnlyWhenForced, ForgetAllSCEV, ProvidedCount,
         ProvidedThreshold, ProvidedAllowPartial, ProvidedRuntime,
         ProvidedUpperBound, ProvidedAllowPeeling,
+#if defined(ENABLE_AUTOTUNER)
+        ProvidedAllowProfileBasedPeeling, ProvidedFullUnrollMaxCount,
+        Invocation);
+#else
         ProvidedAllowProfileBasedPeeling, ProvidedFullUnrollMaxCount);
+#endif
 
     if (Result == LoopUnrollResult::FullyUnrolled)
       LPM.markLoopAsDeleted(*L);
@@ -1449,6 +1613,9 @@ public:
     getLoopAnalysisUsage(AU);
   }
 };
+#if defined(ENABLE_AUTOTUNER)
+unsigned int LoopUnroll::InvocationCounter = 0;
+#endif
 
 } // end anonymous namespace
 
@@ -1496,6 +1663,11 @@ PreservedAnalyses LoopFullUnrollPass::run(Loop &L, LoopAnalysisManager &AM,
 
   std::string LoopName = std::string(L.getName());
 
+#if defined(ENABLE_AUTOTUNER)
+  // LoopFullUnrollPass will be invoked first during optimization pipeline.
+  unsigned int Invocation = 0;
+#endif
+
   bool Changed =
       tryToUnrollLoop(&L, AR.DT, &AR.LI, AR.SE, AR.TTI, AR.AC, ORE,
                       /*BFI*/ nullptr, /*PSI*/ nullptr,
@@ -1505,7 +1677,12 @@ PreservedAnalyses LoopFullUnrollPass::run(Loop &L, LoopAnalysisManager &AM,
                       /*Runtime*/ false, /*UpperBound*/ false,
                       /*AllowPeeling*/ true,
                       /*AllowProfileBasedPeeling*/ false,
+#if defined(ENABLE_AUTOTUNER)
+                      /*FullUnrollMaxCount*/ std::nullopt,
+                      /*Invocation*/ Invocation) !=
+#else
                       /*FullUnrollMaxCount*/ std::nullopt) !=
+#endif
       LoopUnrollResult::Unmodified;
   if (!Changed)
     return PreservedAnalyses::all();
@@ -1588,6 +1765,11 @@ PreservedAnalyses LoopUnrollPass::run(Function &F,
 
   bool Changed = false;
 
+#if defined(ENABLE_AUTOTUNER)
+  // LoopUnrollPass will be invoked second during optimization pipeline.
+  unsigned int Invocation = 1;
+#endif
+
   // The unroller requires loops to be in simplified form, and also needs LCSSA.
   // Since simplification may add new inner loops, it has to run before the
   // legality and profitability checks. This means running the loop unroller
@@ -1630,7 +1812,12 @@ PreservedAnalyses LoopUnrollPass::run(Function &F,
         /*Count*/ std::nullopt,
         /*Threshold*/ std::nullopt, UnrollOpts.AllowPartial,
         UnrollOpts.AllowRuntime, UnrollOpts.AllowUpperBound, LocalAllowPeeling,
+#if defined(ENABLE_AUTOTUNER)
+        UnrollOpts.AllowProfileBasedPeeling, UnrollOpts.FullUnrollMaxCount,
+        Invocation);
+#else
         UnrollOpts.AllowProfileBasedPeeling, UnrollOpts.FullUnrollMaxCount);
+#endif
     Changed |= Result != LoopUnrollResult::Unmodified;
 
     // The parent must not be damaged by unrolling!

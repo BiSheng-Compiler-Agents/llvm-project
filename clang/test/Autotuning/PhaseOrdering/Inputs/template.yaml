@@ -1,0 +1,8 @@
+--- !AutoTuning
+Pass:            all
+Name:            [filename]
+Function:        none
+CodeRegionType:  other
+Args:
+  - OptPass: [pass]
+...

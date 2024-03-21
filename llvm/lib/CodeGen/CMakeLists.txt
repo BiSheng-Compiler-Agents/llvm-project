@@ -273,6 +273,7 @@ add_llvm_component_library(LLVMCodeGen
 
   LINK_COMPONENTS
   Analysis
+  AutoTuner
   BitReader
   BitWriter
   CodeGenTypes

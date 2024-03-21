@@ -16,6 +16,9 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/AutoTuner/AutoTuning.h"
+#endif
 
 using namespace llvm;
 using namespace SwitchCG;
@@ -61,7 +64,23 @@ void SwitchCG::SwitchLowering::findJumpTables(CaseClusterVector &Clusters,
   if (!TLI->areJTsAllowed(SI->getParent()->getParent()))
     return;
 
+#if defined(ENABLE_AUTOTUNER)
+  unsigned MinJumpTableEntries = TLI->getMinimumJumpTableEntries();
+  // Overwrite MinJumpTableEntries when it is set by Autotuner
+  if (autotuning::Engine.isEnabled()) {
+    autotuning::Engine.initContainer(SI->ATESwitchInst.get(),
+                                     "switch-lowering");
+
+    int NewValue = 0; // the int value is set by lookUpParams()
+    bool Changed =
+        SI->ATESwitchInst->lookUpParams<int>("MinJumpTableEntries", NewValue);
+    if (Changed)
+      MinJumpTableEntries = NewValue;
+  }
+#else
   const unsigned MinJumpTableEntries = TLI->getMinimumJumpTableEntries();
+#endif
+
   const unsigned SmallNumberOfEntries = MinJumpTableEntries / 2;
 
   // Bail if not enough cases.

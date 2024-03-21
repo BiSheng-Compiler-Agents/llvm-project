@@ -15,10 +15,45 @@
 #include "llvm/Remarks/Remark.h"
 #include "llvm/Support/FileSystem.h"
 #include <optional>
+#if defined(ENABLE_AUTOTUNER)
+#include "llvm/Support/CommandLine.h"
+#endif
 
 using namespace llvm;
 using namespace llvm::remarks;
 
+#if defined(ENABLE_AUTOTUNER)
+extern cl::opt<bool> OmitAutotuningMetadata;
+
+// Use the same keys whether we use a string table or not (respectively, T is an
+// unsigned or a StringRef).
+template <typename T>
+static void mapRemarkHeader(
+    yaml::IO &io, T PassName, T RemarkName, std::optional<RemarkLocation> RL,
+    T FunctionName, std::optional<StringRef> CodeRegionType,
+    std::optional<uint64_t> CodeRegionHash,
+    std::optional<unsigned int> Invocation,
+    std::optional<std::map<std::string, std::string>> BaselineConfig,
+    std::optional<std::map<std::string, std::vector<unsigned int>>>
+        AutoTunerOptions,
+    std::optional<uint64_t> Hotness, ArrayRef<Argument> Args) {
+  io.mapRequired("Pass", PassName);
+  if (!OmitAutotuningMetadata) {
+    io.mapRequired("Name", RemarkName);
+    io.mapOptional("DebugLoc", RL);
+    io.mapRequired("Function", FunctionName);
+  }
+  io.mapOptional("CodeRegionType", CodeRegionType);
+  io.mapOptional("CodeRegionHash", CodeRegionHash);
+  io.mapOptional("DynamicConfigs", AutoTunerOptions);
+  io.mapOptional("BaselineConfig", BaselineConfig);
+  io.mapOptional("Invocation", Invocation);
+  if (!OmitAutotuningMetadata) {
+    io.mapOptional("Hotness", Hotness);
+    io.mapOptional("Args", Args);
+  }
+}
+#else
 // Use the same keys whether we use a string table or not (respectively, T is an
 // unsigned or a StringRef).
 template <typename T>
@@ -33,6 +68,7 @@ static void mapRemarkHeader(yaml::IO &io, T PassName, T RemarkName,
   io.mapOptional("Hotness", Hotness);
   io.mapOptional("Args", Args);
 }
+#endif
 
 namespace llvm {
 namespace yaml {
@@ -53,6 +89,10 @@ template <> struct MappingTraits<remarks::Remark *> {
     else if (io.mapTag("!AnalysisAliasing",
                        (Remark->RemarkType == Type::AnalysisAliasing)))
       ;
+#if defined(ENABLE_AUTOTUNER)
+    else if (io.mapTag("!AutoTuning", (Remark->RemarkType == Type::AutoTuning)))
+      ;
+#endif
     else if (io.mapTag("!Failure", (Remark->RemarkType == Type::Failure)))
       ;
     else
@@ -66,13 +106,57 @@ template <> struct MappingTraits<remarks::Remark *> {
       unsigned NameID = StrTab.add(Remark->RemarkName).first;
       unsigned FunctionID = StrTab.add(Remark->FunctionName).first;
       mapRemarkHeader(io, PassID, NameID, Remark->Loc, FunctionID,
+#if defined(ENABLE_AUTOTUNER)
+                      Remark->CodeRegionType, Remark->CodeRegionHash,
+                      Remark->Invocation, Remark->BaselineConfig,
+                      Remark->AutoTunerOptions, Remark->Hotness, Remark->Args);
+
+#else
                       Remark->Hotness, Remark->Args);
+#endif
     } else {
       mapRemarkHeader(io, Remark->PassName, Remark->RemarkName, Remark->Loc,
+#if defined(ENABLE_AUTOTUNER)
+                      Remark->FunctionName, Remark->CodeRegionType,
+                      Remark->CodeRegionHash, Remark->Invocation,
+                      Remark->BaselineConfig, Remark->AutoTunerOptions,
+                      Remark->Hotness, Remark->Args);
+#else
                       Remark->FunctionName, Remark->Hotness, Remark->Args);
+#endif
     }
   }
 };
+
+#if defined(ENABLE_AUTOTUNER)
+// YAML I/O to support dumping 'Values: { key: [...], ... }' in opportunity
+// files.
+template <>
+struct MappingTraits<std::map<std::string, std::vector<unsigned int>>> {
+  static void mapping(IO &io,
+                      std::map<std::string, std::vector<unsigned int>> &OM) {
+    assert(io.outputting() && "input not yet implemented");
+
+    // Print as an abbreviated dictionary
+    llvm::yaml::StdMapStringCustomMappingTraitsImpl<
+        std::vector<unsigned int>>::output(io, OM);
+  }
+  // This sets the beginFlowMapping and endFlowMapping
+  static const bool flow = true;
+};
+
+template <> struct MappingTraits<std::map<std::string, std::string>> {
+  static void mapping(IO &io, std::map<std::string, std::string> &OM) {
+    assert(io.outputting() && "input not yet implemented");
+
+    // Print as an abbreviated dictionary
+    llvm::yaml::StdMapStringCustomMappingTraitsImpl<std::string>::output(io,
+                                                                         OM);
+  }
+  // This sets the beginFlowMapping and endFlowMapping
+  static const bool flow = true;
+};
+#endif
 
 template <> struct MappingTraits<RemarkLocation> {
   static void mapping(IO &io, RemarkLocation &RL) {

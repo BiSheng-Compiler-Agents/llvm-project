@@ -58,6 +58,16 @@ namespace llvm {
   // in a function and builds the region hierarchy.
   //
   FunctionPass *createRegionInfoPass();
+
+#if defined(ENABLE_AUTOTUNER)
+  //===--------------------------------------------------------------------===//
+  //
+  // createAutotuningDumpPass - This pass collects IR of tuned regions
+  // and stores them into predetrmined locations.
+  // for the purpose of autotuning ML guidance
+  //
+  ModulePass *createAutotuningDumpPass();
+#endif
 }
 
 #endif

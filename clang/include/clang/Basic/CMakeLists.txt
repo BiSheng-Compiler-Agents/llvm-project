@@ -1,6 +1,12 @@
+set(CLANG_BASIC_OPTIONS)
+if(LLVM_ENABLE_AUTOTUNER)
+  list(APPEND CLANG_BASIC_OPTIONS "-DENABLE_AUTOTUNER")
+endif()
+
 macro(clang_diag_gen component)
   clang_tablegen(Diagnostic${component}Kinds.inc
     -gen-clang-diags-defs -clang-component=${component}
+    ${CLANG_BASIC_OPTIONS}
     SOURCE Diagnostic.td
     TARGET ClangDiagnostic${component})
 endmacro(clang_diag_gen)
@@ -18,20 +24,24 @@ clang_diag_gen(Refactoring)
 clang_diag_gen(Sema)
 clang_diag_gen(Serialization)
 clang_tablegen(DiagnosticGroups.inc -gen-clang-diag-groups
+  ${CLANG_BASIC_OPTIONS}
   SOURCE Diagnostic.td
   TARGET ClangDiagnosticGroups)
 
 clang_tablegen(DiagnosticIndexName.inc -gen-clang-diags-index-name
+  ${CLANG_BASIC_OPTIONS}
   SOURCE Diagnostic.td
   TARGET ClangDiagnosticIndexName)
 
 clang_tablegen(AttrList.inc -gen-clang-attr-list
   -I ${CMAKE_CURRENT_SOURCE_DIR}/../../
+  ${CLANG_BASIC_OPTIONS}
   SOURCE Attr.td
   TARGET ClangAttrList)
 
 clang_tablegen(AttrSubMatchRulesList.inc -gen-clang-attr-subject-match-rule-list
   -I ${CMAKE_CURRENT_SOURCE_DIR}/../../
+  ${CLANG_BASIC_OPTIONS}
   SOURCE Attr.td
   TARGET ClangAttrSubjectMatchRuleList)
 
@@ -43,6 +53,7 @@ clang_tablegen(AttrTokenKinds.inc -gen-clang-attr-token-kinds
 
 clang_tablegen(AttrHasAttributeImpl.inc -gen-clang-attr-has-attribute-impl
   -I ${CMAKE_CURRENT_SOURCE_DIR}/../../
+  ${CLANG_BASIC_OPTIONS}
   SOURCE Attr.td
   TARGET ClangAttrHasAttributeImpl
   )
@@ -67,15 +78,19 @@ clang_tablegen(arm_mve_builtin_aliases.inc -gen-arm-mve-builtin-aliases
   SOURCE arm_mve.td
   TARGET ClangARMMveBuiltinAliases)
 clang_tablegen(arm_sve_builtins.inc -gen-arm-sve-builtins
+  ${CLANG_BASIC_OPTIONS}
   SOURCE arm_sve.td
   TARGET ClangARMSveBuiltins)
 clang_tablegen(arm_sve_builtin_cg.inc -gen-arm-sve-builtin-codegen
+  ${CLANG_BASIC_OPTIONS}
   SOURCE arm_sve.td
   TARGET ClangARMSveBuiltinCG)
 clang_tablegen(arm_sve_typeflags.inc -gen-arm-sve-typeflags
+  ${CLANG_BASIC_OPTIONS}
   SOURCE arm_sve.td
   TARGET ClangARMSveTypeFlags)
 clang_tablegen(arm_sve_sema_rangechecks.inc -gen-arm-sve-sema-rangechecks
+  ${CLANG_BASIC_OPTIONS}
   SOURCE arm_sve.td
   TARGET ClangARMSveSemaRangeChecks)
 clang_tablegen(arm_sme_builtins.inc -gen-arm-sme-builtins

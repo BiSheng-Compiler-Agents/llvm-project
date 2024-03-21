@@ -242,6 +242,15 @@ def err_drv_cannot_read_config_file : Error<
   "cannot read configuration file '%0': %1">;
 def err_drv_arg_requires_bitcode_input: Error<
   "option '%0' requires input to be LLVM bitcode">;
+#ifdef ENABLE_AUTOTUNER
+def err_drv_autotune_generic : Error<"%0">;
+def err_drv_autotune_disabled_O0 : Error<
+  "-fautotune/-fautotune-generate should not be enabled at -O0">;
+def err_drv_autotune_incorrect_env : Error<
+  "incorrect argument '%0' in environment variable used">;
+def err_drv_autotune_no_filter_types : Error<
+  "no types added for filtering with %0">;
+#endif
 
 def err_target_unsupported_arch
   : Error<"the target architecture '%0' is not supported by the target '%1'">;

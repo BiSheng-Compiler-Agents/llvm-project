@@ -383,15 +383,27 @@ llvm::shouldInline(CallBase &CB,
   Function *Callee = CB.getCalledFunction();
   Function *Caller = CB.getCaller();
 
+#if defined(ENABLE_AUTOTUNER)
+  // Get the code Region to add BaselineConfig values for inline
+  const autotuning::CodeRegion &CR = CB.ATECallSite.get()->getCodeRegion();
+  static const std::string ForceInlineParamStr = "ForceInline";
+#endif
+
   if (IC.isAlways()) {
     LLVM_DEBUG(dbgs() << "    Inlining " << inlineCostStr(IC)
                       << ", Call: " << CB << "\n");
+#if defined(ENABLE_AUTOTUNER)
+    autotuning::Engine.addOpportunity(CR, {{ForceInlineParamStr, "1"}});
+#endif
     return IC;
   }
 
   if (!IC) {
     LLVM_DEBUG(dbgs() << "    NOT Inlining " << inlineCostStr(IC)
                       << ", Call: " << CB << "\n");
+#if defined(ENABLE_AUTOTUNER)
+    autotuning::Engine.addOpportunity(CR, {{ForceInlineParamStr, "0"}});
+#endif
     if (IC.isNever()) {
       ORE.emit([&]() {
         return OptimizationRemarkMissed(DEBUG_TYPE, "NeverInline", Call)
@@ -417,6 +429,9 @@ llvm::shouldInline(CallBase &CB,
     LLVM_DEBUG(dbgs() << "    NOT Inlining: " << CB
                       << " Cost = " << IC.getCost()
                       << ", outer Cost = " << TotalSecondaryCost << '\n');
+#if defined(ENABLE_AUTOTUNER)
+    autotuning::Engine.addOpportunity(CR, {{ForceInlineParamStr, "0"}});
+#endif
     ORE.emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "IncreaseCostInOtherContexts",
                                       Call)
@@ -430,6 +445,9 @@ llvm::shouldInline(CallBase &CB,
 
   LLVM_DEBUG(dbgs() << "    Inlining " << inlineCostStr(IC) << ", Call: " << CB
                     << '\n');
+#if defined(ENABLE_AUTOTUNER)
+  autotuning::Engine.addOpportunity(CR, {{ForceInlineParamStr, "1"}});
+#endif
   return IC;
 }
 

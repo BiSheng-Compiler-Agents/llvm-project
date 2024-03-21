@@ -1,0 +1,9 @@
+--- !AutoTuning
+Pass:            loop-unroll
+Name:            loop
+Function:        invariant_backedge_1
+CodeRegionType:  loop
+Args:
+ - UnrollCount: [number]
+Invocation:      0
+...

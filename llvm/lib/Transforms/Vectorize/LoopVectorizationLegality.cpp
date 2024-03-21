@@ -113,6 +113,18 @@ LoopVectorizeHints::LoopVectorizeHints(const Loop *L,
   // Populate values with existing loop metadata.
   getHintsFromMetadata();
 
+#if defined(ENABLE_AUTOTUNER)
+  if (autotuning::Engine.isEnabled()) {
+    int NewValue = 0;
+    bool VectorizationInterleaveChanged =
+        L->lookUpParams<int>("VectorizationInterleave", NewValue);
+
+    if (VectorizationInterleaveChanged) {
+      Interleave.Value = NewValue;
+    }
+  }
+#endif
+
   // force-vector-interleave overrides DisableInterleaving.
   if (VectorizerParams::isInterleaveForced())
     Interleave.Value = VectorizerParams::VectorizationInterleave;

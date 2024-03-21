@@ -72,6 +72,14 @@ enum ModuleHeaderMode {
   HeaderMode_System
 };
 
+#if defined(ENABLE_AUTOTUNER)
+enum AutoTuneKind {
+  AutoTuneNone,
+  AutoTuneGenerate,
+  AutoTuneNext,
+};
+#endif
+
 /// Driver - Encapsulate logic for constructing compilation processes
 /// from a set of gcc-driver-like command line arguments.
 class Driver {
@@ -118,6 +126,11 @@ class Driver {
 
   /// LTO mode selected via -f(no-offload-)?lto(=.*)? options.
   LTOKind OffloadLTOMode;
+
+#if defined(ENABLE_AUTOTUNER)
+  /// AutoTune mode selected via -fautotune or -fautotune-generate option
+  AutoTuneKind AutoTuneMode;
+#endif
 
 public:
   enum OpenMPRuntimeKind {
@@ -190,6 +203,21 @@ public:
 
   /// Information about the host which can be overridden by the user.
   std::string HostBits, HostMachine, HostSystem, HostRelease;
+
+#if defined(ENABLE_AUTOTUNER)
+  /// The path to the llvm-autotune data directory.
+  std::string AutoTuneDirDataPath;
+  /// Path for project base directory. Base directory is removed from absolute
+  /// path and relative path is used as (coarse-grain) code region name. This
+  /// allow to port a config file from one machine/location to another.
+  std::string AutoTuneProjectDir;
+
+  /// Whether to prepare the compiler to produce additional metadata
+  /// that will be consumed by Autotuner's ML model
+  bool IsMLTuningEnabled;
+
+  std::string AutoTuneOptions;
+#endif
 
   /// The file to log CC_PRINT_PROC_STAT_FILE output to, if enabled.
   std::string CCPrintStatReportFilename;
@@ -704,6 +732,14 @@ public:
   LTOKind getLTOMode(bool IsOffload = false) const {
     return IsOffload ? OffloadLTOMode : LTOMode;
   }
+
+#if defined(ENABLE_AUTOTUNER)
+  /// Returns true if we are performing any kind of AutoTune.
+  bool isUsingAutoTune() const { return AutoTuneMode != AutoTuneNone; }
+
+  /// Get the specific kind of AutoTune being performed.
+  AutoTuneKind getAutoTuneMode() const { return AutoTuneMode; }
+#endif
 
 private:
 
