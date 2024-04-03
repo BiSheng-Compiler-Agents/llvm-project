@@ -18,9 +18,10 @@
 
 #include "llvm/Analysis/PhaseOrder.h"
 #include <memory>
+#include <random>
 #include <unordered_map>
 
-enum IRCostFunction { FileSize, InstCount, IRAnalysis };
+enum IRCostFunction { FileSize, InstCount, IRAnalysis, MCA };
 
 enum CoolingType { Geometric, Linear };
 
@@ -60,7 +61,7 @@ public:
   virtual State neighbour(State &S) = 0;
 
   // Return the energy of S
-  virtual double cost(State &S) = 0;
+  virtual double cost(const State &S) = 0;
 
   // Return the acceptance probability given the current state, new state,
   // and a temperature value.
@@ -82,10 +83,15 @@ public:
   double MinTemperature;
   double CoolingRate;
   unsigned int MaxIterations;
-  std::unordered_map<std::string, int> CostMap;
+  bool ProteanOutputTable;
+  std::unordered_map<std::string, double> CostMap;
+  std::set<std::string> AllRecipesSet;
+  std::vector<std::string> AllRecipes;
+  std::default_random_engine RandomEngine;
   SimulatedAnnealingProtean(CoolingType CoolingSchedule,
                             unsigned int MaxIterations, IRCostFunction CostType,
-                            std::string OutputFileName);
+                            std::string OutputFileName,
+                            bool ProteanOutputTable);
 
   using State = PhaseOrderGeneratorBase::Recipes;
   void run() override;
@@ -97,23 +103,28 @@ public:
   State neighbour(State &S) override;
 
   // For now: Return a constant energy.
-  double cost(State &S) override;
+  double cost(const State &S) override;
 
   // For now: Return 1 (i.e. always accept the new state).
   double probabilityOfNewState(State &S, State &SNew,
                                double Temperature) override;
 
   // Calculates cost based on instruction count
-  double instructionCountCost(SimulatedAnnealingProtean::State &S,
-                              std::string OutputFilename);
+  double instructionCountCost(const State &S, std::string OutputFilename);
 
   // Calculates cost using an IR Analyzer
-  double irAnalysisCost(SimulatedAnnealingProtean::State &S,
-                        std::string OutputFilename);
+  double irAnalysisCost(const State &S, std::string OutputFilename);
 
   // Calculates cost based on file size
-  double fileSizeCost(SimulatedAnnealingProtean::State &S,
-                      std::string OutputFilename);
+  double fileSizeCost(const State &S, std::string OutputFilename);
+
+  // Calculates cost based on stats from llvm-mca
+  double mcaCost(const State &S, std::string OutputFilename);
+
+  // Generates all permutations of a given string of recipes
+  void generatePermutationsWithRepetitions(std::string &Recipes,
+                                           std::string &Current,
+                                           int MaxSeqLength);
 };
 
 #endif

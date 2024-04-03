@@ -25,6 +25,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -32,14 +33,34 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <llvm/IR/LLVMContext.h>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #undef DEBUG_TYPE
 #define DEBUG_TYPE "protean"
+#define BISHENG_INSTALL_DIR "BISHENG_INSTALL_DIR"
+
+void SimulatedAnnealingProtean::generatePermutationsWithRepetitions(
+    std::string &Recipes, std::string &Current, int MaxSeqLength) {
+  AllRecipesSet.insert(Current);
+  if (Current.size() == MaxSeqLength) {
+    return;
+  }
+
+  for (auto &R : Recipes) {
+    Current.push_back(R);
+    generatePermutationsWithRepetitions(Recipes, Current, MaxSeqLength);
+    Current.pop_back();
+  }
+}
 namespace llvm {
 class ModelDataScoreCollector : public ModelDataCollector {
 public:
@@ -84,11 +105,21 @@ public:
 } // namespace llvm
 SimulatedAnnealingProtean::SimulatedAnnealingProtean(
     CoolingType CoolingSchedule, unsigned int MaxIterations,
-    IRCostFunction CostType, std::string OutputFilename)
+    IRCostFunction CostType, std::string OutputFilename,
+    bool ProteanOutputTable)
     : Generator{new PhaseOrderGeneratorBase()},
       CoolingSchedule(CoolingSchedule), CostType(CostType),
-      OutputFilename(OutputFilename), MaxTemperature(100.0),
-      MinTemperature(0.1), MaxIterations(MaxIterations) {}
+      OutputFilename(OutputFilename), MaxTemperature(100.0), MinTemperature(1),
+      MaxIterations(MaxIterations), ProteanOutputTable(ProteanOutputTable) {
+  std::string RecipeStr = "01234";
+  std::string current;
+  generatePermutationsWithRepetitions(RecipeStr, current, RecipeStr.size());
+  int RngVal = 123;
+  AllRecipes =
+      std::vector<std::string>(AllRecipesSet.begin(), AllRecipesSet.end());
+  RandomEngine = std::default_random_engine{RngVal};
+  std::shuffle(std::begin(AllRecipes), std::end(AllRecipes), RandomEngine);
+}
 
 // Generate a random int from [Min, Max]
 static int randInt(int Min, int Max) {
@@ -98,11 +129,22 @@ static int randInt(int Min, int Max) {
   return Distr(Gen);
 }
 
+std::string formatDouble(double Num, int Precision) {
+  if (Precision == 0)
+    Precision -= 1;
+  std::string D = std::to_string(Num);
+  return D.substr(0, D.find_last_of(".") + Precision + 1);
+}
+
 void SimulatedAnnealingProtean::run() {
-  SimulatedAnnealingProtean::State S = Generator->generateRecipe();
+  SimulatedAnnealingProtean::State S = Generator->generateRecipe(AllRecipes, 0);
   SimulatedAnnealingProtean::State SNew = S;
+
   setCurState(SNew);
-  for (int Iteration = 0; Iteration < this->MaxIterations + 1; ++Iteration) {
+  setFinalState(SNew);
+  for (int Iteration = 0; Iteration < this->MaxIterations; ++Iteration) {
+    SNew = Generator->generateRecipe(AllRecipes, Iteration);
+    setCurState(SNew);
     double Temp = temperature(Iteration);
     LLVM_DEBUG(llvm::dbgs()
                << "Iteration " << Iteration << " Temperature:" << Temp << "\n");
@@ -134,21 +176,44 @@ void SimulatedAnnealingProtean::run() {
     if (P == -1) {
       continue;
     }
-    if (P >= ((double)randInt(0, INT_MAX) / (double)INT_MAX)) {
+
+    std::uniform_real_distribution<double> Dist(0, 1);
+    double Random = Dist(RandomEngine);
+    if (ProteanOutputTable) {
+      std::stringstream ss;
+      ss << std::setw(9) << Iteration << std::setw(20)
+         << PhaseOrderGeneratorBase::recipesToString(S) << std::setw(20)
+         << PhaseOrderGeneratorBase::recipesToString(SNew) << std::setw(20)
+         << PhaseOrderGeneratorBase::recipesToString(getFinalState())
+         << std::setw(20) << formatDouble(cost(S), 1) << std::setw(20)
+         << formatDouble(cost(SNew), 1) << std::setw(20)
+         << formatDouble(cost(getFinalState()), 1) << std::setw(20)
+         << (P >= Random ? "Y" : "N") << std::setw(20) << formatDouble(Temp, 1)
+         << "\n";
+      llvm::dbgs() << ss.str();
+    }
+    if (P >= Random) {
       LLVM_DEBUG(llvm::dbgs() << "New state accepted\n");
       S = SNew;
     }
-    SNew = Generator->generateRecipe(S);
-    setCurState(SNew);
+    if (cost(getFinalState()) > cost(S)) {
+      setFinalState(S);
+    }
+    if (getFinalState() != SNew) {
+      std::string NewOutputFilename = OutputFilename;
+      NewOutputFilename.insert(
+          NewOutputFilename.find_last_of("."),
+          "-" + PhaseOrderGeneratorBase::recipesToString(SNew));
+      std::remove(NewOutputFilename.c_str());
+    }
   }
 
-  setFinalState(S);
   setFinished(true);
 }
 
 SimulatedAnnealingProtean::State
 SimulatedAnnealingProtean::neighbour(SimulatedAnnealingProtean::State &S) {
-  return Generator->generateRecipe(S);
+  return Generator->generateRecipe(AllRecipes, 0);
 }
 
 double SimulatedAnnealingProtean::temperature(int Iteration) {
@@ -165,9 +230,8 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
   }
 }
 
-double
-SimulatedAnnealingProtean::irAnalysisCost(SimulatedAnnealingProtean::State &S,
-                                          std::string OutputFilename) {
+double SimulatedAnnealingProtean::irAnalysisCost(
+    const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
   llvm::LLVMContext Context;
   llvm::SMDiagnostic Err;
@@ -234,9 +298,8 @@ SimulatedAnnealingProtean::irAnalysisCost(SimulatedAnnealingProtean::State &S,
   return Cost;
 }
 
-double
-SimulatedAnnealingProtean::fileSizeCost(SimulatedAnnealingProtean::State &S,
-                                        std::string OutputFilename) {
+double SimulatedAnnealingProtean::fileSizeCost(
+    const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
   uint64_t Size;
   std::error_code EC = llvm::sys::fs::file_size(OutputFilename, Size);
@@ -248,8 +311,53 @@ SimulatedAnnealingProtean::fileSizeCost(SimulatedAnnealingProtean::State &S,
   return Size;
 }
 
+double
+SimulatedAnnealingProtean::mcaCost(const SimulatedAnnealingProtean::State &S,
+                                   std::string OutputFilename) {
+  std::optional<std::string> LLVMDIROpt =
+      llvm::sys::Process::GetEnv("LLVM_DIR");
+  if (!LLVMDIROpt) {
+    llvm::errs() << "Please Export LLVM_DIR to your Install Directory\n";
+    return -1.0;
+  }
+  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  // Converts output generated by child to assembly, then runs llvm-mca
+  // to collect information about cycles taken
+  if (instructionCountCost(S, OutputFilename) < 1.0) {
+    return 0;
+  }
+  std::string Command = "(" + *LLVMDIROpt + "/bin/llc -o - " + OutputFilename +
+                        " | llvm-mca ) 2>/dev/null";
+  char Buffer[128];
+  std::string McaResult = "";
+
+  // Open pipe to read output from llvm-mca
+  std::FILE *Pipe = popen(Command.c_str(), "r");
+  if (!Pipe) {
+    return -1;
+  }
+
+  // Read until end of process
+  while (!feof(Pipe)) {
+    if (fgets(Buffer, 128, Pipe) != NULL)
+      McaResult += Buffer;
+  }
+  pclose(Pipe);
+  std::istringstream McaStream(McaResult);
+  double Instructions, Cycles;
+  for (std::string Line; std::getline(McaStream, Line);) {
+    // Loop until we find the line with the amount of cycles taken
+    if (Line.find("Cycles:") != std::string::npos) {
+      int LastSpace = Line.find_last_of(" ");
+      Cycles = std::stod(Line.substr(LastSpace, Line.size()));
+      CostMap[RecipeStr] = Cycles;
+      return Cycles;
+    }
+  }
+}
+
 double SimulatedAnnealingProtean::instructionCountCost(
-    SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
+    const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
   llvm::LLVMContext Context;
   llvm::SMDiagnostic Err;
@@ -269,7 +377,8 @@ double SimulatedAnnealingProtean::instructionCountCost(
   return Instructions;
 }
 
-double SimulatedAnnealingProtean::cost(SimulatedAnnealingProtean::State &S) {
+double
+SimulatedAnnealingProtean::cost(const SimulatedAnnealingProtean::State &S) {
   // perform IR analysis to determine cost of current state
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
   // Check if cost has previously been calculated, if so return that value
@@ -286,6 +395,8 @@ double SimulatedAnnealingProtean::cost(SimulatedAnnealingProtean::State &S) {
     return instructionCountCost(S, NewOutputFilename);
   case IRCostFunction::FileSize:
     return fileSizeCost(S, NewOutputFilename);
+  case IRCostFunction::MCA:
+    return mcaCost(S, NewOutputFilename);
   default:
     llvm_unreachable("Not a valid cost function");
   }
@@ -299,13 +410,19 @@ double SimulatedAnnealingProtean::probabilityOfNewState(
   if ((CurrentCost == -1) || (NewCost == -1)) {
     return -1;
   }
-  double Diff = NewCost - CurrentCost;
-  LLVM_DEBUG(llvm::dbgs() << "Cost of new state: " << (int)cost(SNew) << "\n");
-  LLVM_DEBUG(llvm::dbgs() << "Cost of current state: " << (int)cost(S) << "\n");
-  // If new state is worse than old, use equation below to calculate probability
-  // of accepting new state
-  if (Diff >= 0)
-    return exp(-1 * Diff / Temperature);
+  double Diff = 100.0 * (NewCost - CurrentCost) / CurrentCost;
+  LLVM_DEBUG(llvm::dbgs() << "Cost of new state: " << cost(SNew) << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "Cost of current state: " << cost(S) << "\n");
+  // If new state is worse than old, use equation below to calculate
+  // probability of accepting new state
+  if (CostType == IRCostFunction::IRAnalysis) {
+    if (Diff <= 0)
+      return exp(-1 * Diff / Temperature);
+  } else {
+    if (Diff >= 0)
+      return exp(-1 * Diff / Temperature);
+  }
+
   // If new state is better than old, accept new state
   return 1.0;
 }
