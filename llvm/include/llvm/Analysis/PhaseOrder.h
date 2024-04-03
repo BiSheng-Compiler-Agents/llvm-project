@@ -15,6 +15,7 @@
 #ifndef PHASE_ORDER_H
 #define PHASE_ORDER_H
 
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,8 +24,7 @@
 // This class can be used as part of SimluatedAnnealingBase::neighbour().
 class PhaseOrderGeneratorBase {
 public:
-  enum class Recipe { A, B, C, NumOfRecipe };
-
+  enum class Recipe { A, B, C, D, E, NumOfRecipe };
   // Define a recipe type
   using Recipes = std::vector<Recipe>;
   using PMap = std::unordered_map<std::string, std::string>;
@@ -36,6 +36,7 @@ public:
 
   static std::string recipesToPasses(Recipes const &R, PMap &PassMap);
   static std::string recipesToString(Recipes const &R);
+  Recipes generateRecipe(std::vector<std::string> &AllRecipes, int Iteration);
 
 private:
   static std::unordered_map<Recipe, std::string> RecipeToPassOrders;

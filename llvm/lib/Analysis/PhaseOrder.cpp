@@ -14,22 +14,26 @@
 
 #include "llvm/Analysis/PhaseOrder.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <random>
 #include <sstream>
+#include <string>
 #include <unordered_map>
 
 #define REGISTER_RECIPE_TO_PASSES(RECIPE, ...)                                 \
   { PhaseOrderGeneratorBase::Recipe::RECIPE, #__VA_ARGS__ }
 // TODO: For some reason when trying to commit this file there will be
 // formatting issues.
-// TODO: Rightnow the __VA_ARGS__ has to be comma separated WITHOUT any spaces.
+// TODO: Right now the __VA_ARGS__ has to be comma separated WITHOUT any spaces.
 // Find a way to get rid of all the spaces.
 std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
-    PhaseOrderGeneratorBase::RecipeToPassOrders{
-      REGISTER_RECIPE_TO_PASSES(A, loop-simplify,loop-unroll<O3;partial>,),
-      REGISTER_RECIPE_TO_PASSES(B, inline,),
-      REGISTER_RECIPE_TO_PASSES(C, argpromotion,),
+    PhaseOrderGeneratorBase::RecipeToPassOrders {
+      REGISTER_RECIPE_TO_PASSES(A, globalopt,cgscc(devirt<4>(inline<only-mandatory>,inline,move-auto-init,function-attrs<skip-non-recursive-function-attrs>,argpromotion,function<eager-inv;no-rerun>(sroa<modify-cfg>,speculative-execution,tailcallelim,loop-mssa(licm<allowspeculation>,simple-loop-unswitch<nontrivial;trivial>),loop(loop-idiom,indvars,loop-deletion),loop-unroll<O3>,early-cse<>,callsite-splitting,sroa<modify-cfg>,early-cse<memssa>,speculative-execution,jump-threading,correlated-propagation,lower-expect,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,aggressive-instcombine,tailcallelim,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,reassociate))),),
+      REGISTER_RECIPE_TO_PASSES(B, function<eager-inv>(loop-simplify,lcssa,crypto,chr,loop(loop-rotate<no-header-duplication;no-prepare-for-lto>,loop-deletion),annotation-remarks,constraint-elimination,mem2reg,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-simplify,lcssa,indvars,loop-deletion,loop-simplify,lcssa,loop-instsimplify,loop-simplifycfg,function(loop-mssa(licm<allowspeculation>)),simple-loop-unswitch,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>),require<globals-aa>,function(invalidate<aa>),require<profile-summary>,function<eager-inv>(loop-simplify,lcssa,loop(loop-idiom,loop-deletion,loop-unroll-full),loop-data-prefetch,hash-data-prefetch,separate-const-offset-from-gep),),
+      REGISTER_RECIPE_TO_PASSES(C, function<eager-inv>(sroa<modify-cfg>,gvn-hoist,mldst-motion,gvn,sccp,bdce,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,jump-threading,correlated-propagation,adce,memcpyopt),),
+      REGISTER_RECIPE_TO_PASSES(D, cgscc(dse,function<eager-inv>(loop-simplify,lcssa,coro-elide,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,reassociate),function-attrs,function(require<should-not-run-function-passes>),coro-split,function(invalidate<all>)),deadargelim,coro-cleanup,globalopt,globaldce,elim-avail-extern,rpo-function-attrs,recompute-globalsaa,ipsccp,function<eager-inv>(float2int,lower-constant-intrinsics),constmerge,cg-profile,rel-lookup-table-converter,ir-library-injection,),
+      REGISTER_RECIPE_TO_PASSES(E, function<eager-inv>(loop-simplify,lcssa,loop(loop-rotate<no-header-duplication;no-prepare-for-lto>,loop-deletion),loop-distribute,loop-simplify,lcssa,loop-unroll-and-jam,inject-tli-mappings,loop-vectorize<no-interleave-forced-only;vectorize-forced-only;>,infer-alignment,loop-load-elim,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,vector-combine,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-unroll<O3>,transform-warning,sroa<preserve-cfg>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-simplify,lcssa,loop-mssa(licm<allowspeculation>),alignment-from-assumptions,loop-sink,instsimplify,div-rem-pairs,tailcallelim,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,annotation-remarks),),
 };
 #undef REGISTER_RECIPE_TO_PASSES
 
@@ -37,9 +41,10 @@ std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
   { PhaseOrderGeneratorBase::Recipe::RECIPE, #RECIPE }
 std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
     PhaseOrderGeneratorBase::RecipeToString{
-        REGISTER_RECIPE_TO_STRING(A),
-        REGISTER_RECIPE_TO_STRING(B),
-        REGISTER_RECIPE_TO_STRING(C),
+        REGISTER_RECIPE_TO_STRING(A), REGISTER_RECIPE_TO_STRING(B),
+        REGISTER_RECIPE_TO_STRING(C), REGISTER_RECIPE_TO_STRING(D),
+        REGISTER_RECIPE_TO_STRING(E),
+
     };
 #undef REGISTER_RECIPE_TO_STRING
 
@@ -174,9 +179,11 @@ static PhaseOrderGeneratorBase::Recipes convert(const std::vector<int> &in) {
 }
 
 PhaseOrderGeneratorBase::Recipes PhaseOrderGeneratorBase::generateRecipe() {
-  // For now just generate a random recipe of length 2.
+  // Generate random sequence
+  int Length = randInt(1, 5);
   std::vector<int> Res = randomIntSeq(
-      2, 0, static_cast<int>(PhaseOrderGeneratorBase::Recipe::NumOfRecipe) - 1);
+      Length, 0,
+      static_cast<int>(PhaseOrderGeneratorBase::Recipe::NumOfRecipe) - 1);
 
   return convert(Res);
 }
@@ -185,4 +192,15 @@ PhaseOrderGeneratorBase::Recipes PhaseOrderGeneratorBase::generateRecipe(
     PhaseOrderGeneratorBase::Recipes const &R) {
   // For now just generate a random sequence.
   return generateRecipe();
+}
+PhaseOrderGeneratorBase::Recipes
+PhaseOrderGeneratorBase::generateRecipe(std::vector<std::string> &AllRecipes,
+                                        int Iteration) {
+  // For now just generate a random sequence.
+  std::string Recipe = AllRecipes[Iteration];
+  std::vector<int> rs;
+  for (auto i : Recipe) {
+    rs.push_back(std::stoi(std::string(1, i)));
+  }
+  return convert(rs);
 }

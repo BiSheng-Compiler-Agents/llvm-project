@@ -300,15 +300,21 @@ static cl::opt<CoolingType> CoolingSchedule(
 static cl::opt<unsigned> MaxIterations(
     "max-iterations",
     cl::desc("Specify Maximum Iterations for Simulated Annealing"),
-    cl::init(50));
+    cl::init(100));
 
 static cl::opt<IRCostFunction> CostType(
     "cost-type", cl::init(FileSize),
     cl::desc("Choose IR Cost Function used for Simulated Annealing"),
-    cl::values(clEnumVal(FileSize, "Determine cost based on file size"),
-               clEnumVal(InstCount,
-                         "Determine cost based on instruction count"),
-               clEnumVal(IRAnalysis, "Determine cost based on IR Analyzer")));
+    cl::values(
+        clEnumVal(FileSize, "Determine cost based on file size"),
+        clEnumVal(InstCount, "Determine cost based on instruction count"),
+        clEnumVal(IRAnalysis, "Determine cost based on IR Analyzer"),
+        clEnumVal(MCA, "Determine cost based on llvm-mca (cycle count)")));
+
+static cl::opt<bool> ProteanOutputTable(
+    "protean-output-table",
+    cl::desc("Output Table of Simulated Annealing information"),
+    cl::init(true));
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
 //
@@ -711,15 +717,17 @@ int main(int argc, char **argv) {
       Pipeline = "default<Oz>";
 
     // If protean is enabled goto the Simulated Annealing process:
-    //   The Simulated Annealing process first creates an random recipe then it creates a forked
-    //   process.
+    //   The Simulated Annealing process first creates an random recipe then it
+    //   creates a forked process.
     //     (1) The parent process wait's for the child process and continue the
     //     Simulated Annealing main loop.
     //     (2) The child process will return back here and modify
     //     the Pipeline according to the randomly generated recipe.
-    // At the end of the Simulated Annealing loop the parnet process will just exit/return from
-    // here.
+    // At the end of the Simulated Annealing loop the parent process will just
+    // exit/return from here.
     if (UseProteanInitialPasses.getValue()) {
+      dbgs() << "Beginning Simulated Annealing For Module " << M->getName()
+             << "\n";
       std::string Recipes;
       if (OutputFilename == "-") {
         errs() << "Specify an output file with -o to activate Simulated "
@@ -727,12 +735,26 @@ int main(int argc, char **argv) {
         return 1;
       }
 
-      SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
-          CoolingSchedule, MaxIterations, CostType, OutputFilename);
+      SimulatedAnnealingProtean SAProtean =
+          SimulatedAnnealingProtean(CoolingSchedule, MaxIterations, CostType,
+                                    OutputFilename, ProteanOutputTable);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
+      if (ProteanOutputTable) {
+        std::stringstream ss;
+        ss << std::setw(9) << "Iteration  ";
+        ss << std::setw(20) << "Current State";
+        ss << std::setw(20) << "Next State";
+        ss << std::setw(20) << "Best State";
+        ss << std::setw(20) << "Current Cost";
+        ss << std::setw(20) << "Next Cost";
+        ss << std::setw(20) << "Best Cost";
+        ss << std::setw(20) << "Accepted?";
+        ss << std::setw(20) << "Temperature\n";
+        dbgs() << ss.str();
+      }
+
       SAProtean.run();
       if (SAProtean.getFinished()) {
-        // TODO: Guard with debug messages later.
         LLVM_DEBUG(dbgs() << "Simulated Annealing finished running. ");
         LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
                           << PhaseOrderGeneratorBase::recipesToPasses(
@@ -808,12 +830,15 @@ int main(int argc, char **argv) {
         Recipes = PhaseOrderGeneratorBase::recipesToPasses(
             SAProtean.getCurState(), PassMap);
       }
-      LLVM_DEBUG(dbgs() << "Running Recipe: " << Recipes << "\n");
-
+      LLVM_DEBUG(dbgs() << "Running Recipe: "
+                        << PhaseOrderGeneratorBase::recipesToString(
+                               SAProtean.getCurState())
+                        << "\n");
       if (!Pipeline.empty())
-        Pipeline += ",verify,";
-      else
-        Pipeline += "verify,";
+        Pipeline += ",";
+      Pipeline += "annotation2metadata,forceattrs,inferattrs,coro-early";
+      if (!Recipes.empty())
+        Pipeline += ",";
       Pipeline += Recipes;
       Pipeline += ",loop-collect-features";
       LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
