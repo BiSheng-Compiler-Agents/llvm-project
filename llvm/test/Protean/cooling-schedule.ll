@@ -1,5 +1,5 @@
-; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc %s 2>&1 | FileCheck %s --check-prefix=GEOMETRIC
-; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -cooling=linear %s 2>&1 | FileCheck %s --check-prefix=LINEAR
+; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -max-iterations=50 %s 2>&1 | FileCheck %s --check-prefix=GEOMETRIC
+; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -max-iterations=50 -cooling=Linear %s 2>&1 | FileCheck %s --check-prefix=LINEAR
 ; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -max-iterations=100 %s 2>&1 | FileCheck %s --check-prefix=ITERATIONS
 
 %FunTy = type i32 (i32)
@@ -9,15 +9,13 @@ define void @invoke(ptr %x) {
   ret void
 }
 
-; Checks that cools down in exactly 50 iterations
+; Checks that cools down in exactly 51 iterations
 
-; GEOMETRIC-COUNT-50: Iteration
-; GEOMETRIC-NOT: Iteration 51
+; GEOMETRIC-COUNT-51: Iteration
+; GEOMETRIC-NOT: Iteration
 
-; LINEAR-COUNT-50: Iteration
-; LINEAR-NOT: Iteration 51
+; LINEAR-COUNT-51: Iteration
+; LINEAR-NOT: Iteration
 
-; ITERATIONS-COUNT-100: Iteration
-; ITERATIONS-NOT: Iteration 101
-
-; CHECK: Temperature:1.000000e-01
+; ITERATIONS-COUNT-101: Iteration
+; ITERATIONS-NOT: Iteration

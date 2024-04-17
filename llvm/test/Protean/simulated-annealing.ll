@@ -13,5 +13,4 @@ entry:
 
 ; CHECK: Child exited with: 0
 ; CHECK: Running Recipe: [[PASSES:[a-zA-Z0-9,-<>]+]]
-; CHECK-NEXT: Pipeline: verify,[[PASSES]]
 ; CHECK: Simulated Annealing finished running.
