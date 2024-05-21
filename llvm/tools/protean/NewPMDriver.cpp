@@ -508,7 +508,6 @@ bool llvm::runPassPipeline(
     break;
   }
   MPM.addPass(CollectFeaturesPass());
-#endif
   FunctionPassManager FPM;
   LoopPassManager LPM;
   LPM.addPass(LoopCollectFeaturesPass());
