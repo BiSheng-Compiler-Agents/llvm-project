@@ -132,6 +132,8 @@ public:
   // (which could be implemented similarly like DumpFeatures.h/cpp).
   enum class GroupID {
     EdgeNodeCount,
+    ModuleInfoCount,
+    FunctionInfo,
     FPIRelated,
     HotColdCallSite,
     InlineCostFeatureGroup,
@@ -189,6 +191,23 @@ public:
     NodeCount,
     // End: EdgeNodeCount
 
+    // Begin: ModuleInfoCount
+    FunctionCount,
+    TotalBBCount,
+    AverageBBPerFunction,
+    TotalInstructionCount,
+    TotalFunctionCalls,
+    AverageCallsPerFunction,
+    MedianCallsPerFunction,
+    LoopCount,
+    TotalEdgeCount,
+    CriticalEdgeCount,
+    GlobalVariableCount,
+    AverageInstructionsPerFunction,
+    AverageLoadInstructionsPerFunction,
+    AverageStoreInstructionsPerFunction,
+    // End: ModuleInfoCount
+
     // Begin: HotColdCallsite
     ColdCallSite,
     HotCallSite,
@@ -240,6 +259,9 @@ public:
     IsInInnerLoop,
     IsMustTailCall,
     IsTailCall,
+
+    SCCSize,
+    AverageComponentSize,
     NumOfFeatures
   };
 
