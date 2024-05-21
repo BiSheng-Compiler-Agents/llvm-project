@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ProteanCollectFeatures.h"
+#include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/CallGraph.h"
@@ -85,17 +86,33 @@ public:
     ModelDataCollector::proteanCollectFeatures();
   }
 
-  void printRow(bool printHeader, Module &M, Function &F, CallBase &CB) {
+  void collectFeatures(Module *M, InlineAdvisor *IA,
+                       FunctionAnalysisManager *FAM,
+                       ModuleAnalysisManager *MAM) {
+    bool MandatoryOnly = getOnlyMandatory();
+    resetRegisteredFeatures();
+    Module *GlobalM = M;
+    ProteanCollectFeatures::FeatureInfo GlobalFeatureInfo{
+        ProteanCollectFeatures::FeatureIndex::NumOfFeatures,
+        {FAM, MAM},
+        {nullptr, nullptr, nullptr, GlobalM, nullptr},
+        {MandatoryOnly, IA}};
+
+    registerFeature({ProteanCollectFeatures::Scope::Module}, GlobalFeatureInfo);
+    ModelDataCollector::proteanCollectFeatures();
+  }
+
+  void printRow(bool PrintHeader, Module &M, Function &F, CallBase &CB) {
     // Print the IR file names first
     std::string Out = "";
-    if (printHeader)
+    if (PrintHeader)
       Out += "Module,Function,Callee,Caller,";
     else
       Out += M.getName().str() + "," + F.getName().str() + "," +
              CB.getCalledFunction()->getName().str() + "," +
              CB.getCaller()->getName().str() + ",";
     for (const auto &P : getIRFileNameMap()) {
-      if (printHeader)
+      if (PrintHeader)
         Out += P.getKey();
       else
         Out += P.getValue();
@@ -108,7 +125,38 @@ public:
       if (I)
         Out += ",";
 
-      if (printHeader)
+      if (PrintHeader)
+        Out += Features.at(I).first;
+      else
+        Out += Features.at(I).second;
+    }
+
+    Out += "\n";
+    ModelDataCollector::setOutput(Out);
+  }
+
+  void printRow(bool PrintHeader, Module &M) {
+    // Print the IR file names first
+    std::string Out = "";
+    if (PrintHeader)
+      Out += "Module,";
+    else
+      Out += M.getName().str() + ",";
+    for (const auto &P : getIRFileNameMap()) {
+      if (PrintHeader)
+        Out += P.getKey();
+      else
+        Out += P.getValue();
+
+      Out += ",";
+    }
+
+    for (unsigned I = 0, E = Features.size(); I != E; ++I) {
+      // First value does not get a comma
+      if (I)
+        Out += ",";
+
+      if (PrintHeader)
         Out += Features.at(I).first;
       else
         Out += Features.at(I).second;
@@ -126,54 +174,59 @@ private:
 
 static void
 calculateFPIRelated(ProteanCollectFeatures &ACF,
-                    const ProteanCollectFeatures::FeatureInfo &info);
+                    const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateCallerBlockFreq(ProteanCollectFeatures &ACF,
-                         const ProteanCollectFeatures::FeatureInfo &info);
+                         const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateCallSiteHeight(ProteanCollectFeatures &ACF,
-                        const ProteanCollectFeatures::FeatureInfo &info);
+                        const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateConstantParam(ProteanCollectFeatures &ACF,
-                       const ProteanCollectFeatures::FeatureInfo &info);
+                       const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateCostEstimate(ProteanCollectFeatures &ACF,
-                      const ProteanCollectFeatures::FeatureInfo &info);
+                      const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateEdgeNodeCount(ProteanCollectFeatures &ACF,
-                       const ProteanCollectFeatures::FeatureInfo &info);
+                       const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateHotColdCallSite(ProteanCollectFeatures &ACF,
-                         const ProteanCollectFeatures::FeatureInfo &info);
+                         const ProteanCollectFeatures::FeatureInfo &Info);
 static void calculateLoopLevel(ProteanCollectFeatures &ACF,
-                               const ProteanCollectFeatures::FeatureInfo &info);
+                               const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateMandatoryKind(ProteanCollectFeatures &ACF,
-                       const ProteanCollectFeatures::FeatureInfo &info);
+                       const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateMandatoryOnly(ProteanCollectFeatures &ACF,
-                       const ProteanCollectFeatures::FeatureInfo &info);
+                       const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateInlineCostFeatures(ProteanCollectFeatures &ACF,
-                            const ProteanCollectFeatures::FeatureInfo &info);
+                            const ProteanCollectFeatures::FeatureInfo &Info);
 static void calculateProteanFIExtendedFeaturesFeatures(
     ProteanCollectFeatures &ACF,
-    const ProteanCollectFeatures::FeatureInfo &info);
+    const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateIsIndirectCall(ProteanCollectFeatures &ACF,
-                        const ProteanCollectFeatures::FeatureInfo &info);
+                        const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateIsInInnerLoop(ProteanCollectFeatures &ACF,
-                       const ProteanCollectFeatures::FeatureInfo &info);
+                       const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateIsMustTailCall(ProteanCollectFeatures &ACF,
-                        const ProteanCollectFeatures::FeatureInfo &info);
+                        const ProteanCollectFeatures::FeatureInfo &Info);
 static void
 calculateIsTailCall(ProteanCollectFeatures &ACF,
-                    const ProteanCollectFeatures::FeatureInfo &info);
+                    const ProteanCollectFeatures::FeatureInfo &Info);
 static void calculateOptCode(ProteanCollectFeatures &ACF,
-                             const ProteanCollectFeatures::FeatureInfo &info);
-
+                             const ProteanCollectFeatures::FeatureInfo &Info);
+static void
+calculateFunctionInfo(ProteanCollectFeatures &ACF,
+                      const ProteanCollectFeatures::FeatureInfo &Info);
+static void
+calculateModuleInfoCount(ProteanCollectFeatures &ACF,
+                         const ProteanCollectFeatures::FeatureInfo &Info);
 // Register FeatureIdx -> Feature name
 //          FeatureIdx -> Scope, Scope -> FeatureIdx
 //          FeatureIdx -> Group, Group -> FeatureIdx
@@ -265,6 +318,25 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
         REGISTER_NAME(IsInInnerLoop, "is_in_inner_loop"),
         REGISTER_NAME(IsMustTailCall, "is_must_tail"),
         REGISTER_NAME(IsTailCall, "is_tail"),
+        REGISTER_NAME(FunctionCount, "function_count"),
+        REGISTER_NAME(TotalBBCount, "total_bb_count"),
+        REGISTER_NAME(AverageBBPerFunction, "average_bb_per_function"),
+        REGISTER_NAME(TotalInstructionCount, "total_instruction_count"),
+        REGISTER_NAME(TotalFunctionCalls, "total_function_calls"),
+        REGISTER_NAME(AverageCallsPerFunction, "average_calls_per_function"),
+        REGISTER_NAME(MedianCallsPerFunction, "median_calls_per_function"),
+        REGISTER_NAME(LoopCount, "loop_count"),
+        REGISTER_NAME(TotalEdgeCount, "total_edge_count"),
+        REGISTER_NAME(CriticalEdgeCount, "critical_edge_count"),
+        REGISTER_NAME(GlobalVariableCount, "global_variable_count"),
+        REGISTER_NAME(AverageInstructionsPerFunction,
+                      "average_instructions_per_function"),
+        REGISTER_NAME(AverageLoadInstructionsPerFunction,
+                      "average_load_instructions_per_function"),
+        REGISTER_NAME(AverageStoreInstructionsPerFunction,
+                      "average_store_instructions_per_function"),
+        REGISTER_NAME(SCCSize, "scc_size"),
+        REGISTER_NAME(AverageComponentSize, "average_component_size"),
         REGISTER_NAME(NumOfFeatures, "num_features"),
     };
 #undef REGISTER_NAME
@@ -349,6 +421,22 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_SCOPE(IsInInnerLoop, CallSite),
         REGISTER_SCOPE(IsMustTailCall, CallSite),
         REGISTER_SCOPE(IsTailCall, CallSite),
+        REGISTER_SCOPE(FunctionCount, Module),
+        REGISTER_SCOPE(AverageBBPerFunction, Module),
+        REGISTER_SCOPE(TotalBBCount, Module),
+        REGISTER_SCOPE(TotalInstructionCount, Module),
+        REGISTER_SCOPE(TotalFunctionCalls, Module),
+        REGISTER_SCOPE(AverageCallsPerFunction, Module),
+        REGISTER_SCOPE(MedianCallsPerFunction, Module),
+        REGISTER_SCOPE(TotalEdgeCount, Module),
+        REGISTER_SCOPE(CriticalEdgeCount, Module),
+        REGISTER_SCOPE(GlobalVariableCount, Module),
+        REGISTER_SCOPE(AverageInstructionsPerFunction, Module),
+        REGISTER_SCOPE(AverageLoadInstructionsPerFunction, Module),
+        REGISTER_SCOPE(AverageStoreInstructionsPerFunction, Module),
+        REGISTER_SCOPE(SCCSize, Function),
+        REGISTER_SCOPE(AverageComponentSize, Function),
+        REGISTER_SCOPE(LoopCount, Module),
     };
 #undef REGISTER_SCOPE
 
@@ -446,6 +534,22 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_GROUP(
             ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
             ProteanFIExtendedFeatures),
+        REGISTER_GROUP(FunctionCount, ModuleInfoCount),
+        REGISTER_GROUP(TotalBBCount, ModuleInfoCount),
+        REGISTER_GROUP(AverageBBPerFunction, ModuleInfoCount),
+        REGISTER_GROUP(TotalInstructionCount, ModuleInfoCount),
+        REGISTER_GROUP(TotalFunctionCalls, ModuleInfoCount),
+        REGISTER_GROUP(AverageCallsPerFunction, ModuleInfoCount),
+        REGISTER_GROUP(MedianCallsPerFunction, ModuleInfoCount),
+        REGISTER_GROUP(LoopCount, ModuleInfoCount),
+        REGISTER_GROUP(TotalEdgeCount, ModuleInfoCount),
+        REGISTER_GROUP(CriticalEdgeCount, ModuleInfoCount),
+        REGISTER_GROUP(GlobalVariableCount, ModuleInfoCount),
+        REGISTER_GROUP(AverageInstructionsPerFunction, ModuleInfoCount),
+        REGISTER_GROUP(AverageLoadInstructionsPerFunction, ModuleInfoCount),
+        REGISTER_GROUP(AverageStoreInstructionsPerFunction, ModuleInfoCount),
+        REGISTER_GROUP(SCCSize, FunctionInfo),
+        REGISTER_GROUP(AverageComponentSize, FunctionInfo),
     };
 #undef REGISTER_GROUP
 
@@ -579,6 +683,25 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_FUNCTION(IsInInnerLoop, calculateIsInInnerLoop),
         REGISTER_FUNCTION(IsMustTailCall, calculateIsMustTailCall),
         REGISTER_FUNCTION(IsTailCall, calculateIsTailCall),
+        REGISTER_FUNCTION(FunctionCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(TotalBBCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(AverageBBPerFunction, calculateModuleInfoCount),
+        REGISTER_FUNCTION(TotalInstructionCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(TotalFunctionCalls, calculateModuleInfoCount),
+        REGISTER_FUNCTION(AverageCallsPerFunction, calculateModuleInfoCount),
+        REGISTER_FUNCTION(MedianCallsPerFunction, calculateModuleInfoCount),
+        REGISTER_FUNCTION(LoopCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(TotalEdgeCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(CriticalEdgeCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(GlobalVariableCount, calculateModuleInfoCount),
+        REGISTER_FUNCTION(AverageInstructionsPerFunction,
+                          calculateModuleInfoCount),
+        REGISTER_FUNCTION(AverageLoadInstructionsPerFunction,
+                          calculateModuleInfoCount),
+        REGISTER_FUNCTION(AverageStoreInstructionsPerFunction,
+                          calculateModuleInfoCount),
+        REGISTER_FUNCTION(SCCSize, calculateFunctionInfo),
+        REGISTER_FUNCTION(AverageComponentSize, calculateFunctionInfo),
     };
 #undef REGISTER_FUNCTION
 
@@ -858,6 +981,211 @@ void calculateEdgeNodeCount(ProteanCollectFeatures &ACF,
                              Info, EdgeCountStr);
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::NodeCount,
                              Info, NodeCountStr);
+}
+
+void calculateFunctionInfo(ProteanCollectFeatures &ACF,
+                           const ProteanCollectFeatures::FeatureInfo &Info) {
+  assert(Info.Idx == ProteanCollectFeatures::FeatureIndex::NumOfFeatures ||
+         ProteanCollectFeatures::getFeatureGroup(Info.Idx) ==
+             ProteanCollectFeatures::GroupID::FunctionInfo);
+
+  // Check if we already calculated the values.
+  if (ACF.containsFeature(ProteanCollectFeatures::GroupID::FunctionInfo))
+    return;
+
+  auto *F = Info.SI.F;
+
+  int SCCSize = 0;
+  double AverageComponentSize = 0;
+  for (scc_iterator<Function *> I = scc_begin(F); I != scc_end(F); ++I) {
+    SCCSize += 1;
+    AverageComponentSize += std::distance(I->begin(), I->end());
+  }
+  AverageComponentSize /= SCCSize;
+
+  std::string SCCSizeStr = std::to_string(SCCSize);
+  std::string AverageComponentSizeStr = std::to_string(AverageComponentSize);
+
+  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::SCCSize,
+                             Info, SCCSizeStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::AverageComponentSize, Info,
+      AverageComponentSizeStr);
+}
+
+// Count number of edges where predecessor has more than one outgoing edge,
+// successor has more than one incoming edge
+int calculateCriticalEdges(Module *M) {
+  int CriticalEdgeCount = 0;
+  for (Function &F : *M) {
+    for (BasicBlock &BB : F) {
+      int PredecessorCount =
+          std::distance(successors(&BB).begin(), successors(&BB).end());
+      if (PredecessorCount <= 1) {
+        continue;
+      }
+      for (BasicBlock *Pred : predecessors(&BB)) {
+        if (std::distance(successors(Pred).begin(), successors(Pred).end()) >
+            1) {
+          CriticalEdgeCount += 1;
+        }
+      }
+    }
+  }
+  return CriticalEdgeCount;
+}
+
+// Total number of edges in the module
+int calculateEdges(Module *M) {
+  int EdgeCount = 0;
+  for (Function &F : *M) {
+    for (BasicBlock &BB : F) {
+      EdgeCount +=
+          std::distance(successors(&BB).begin(), successors(&BB).end());
+    }
+  }
+  return EdgeCount;
+}
+
+void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
+                              const ProteanCollectFeatures::FeatureInfo &Info) {
+  assert(Info.Idx == ProteanCollectFeatures::FeatureIndex::NumOfFeatures ||
+         ProteanCollectFeatures::getFeatureGroup(Info.Idx) ==
+             ProteanCollectFeatures::GroupID::ModuleInfoCount);
+
+  // Check if we already calculated the values.
+  if (ACF.containsFeature(ProteanCollectFeatures::GroupID::ModuleInfoCount))
+    return;
+
+  auto *M = Info.SI.M;
+  auto *FAM = Info.Managers.FAM;
+
+  assert(M && FAM && "Module or FAM are nullptr");
+
+  int FunctionCount = 0;
+  int BBCount = 0;
+  int InstructionCount = 0;
+  int LoopCount = 0;
+  int LoadInstructionCount = 0;
+  int StoreInstructionCount = 0;
+  int GlobalVariableCount =
+      std::distance(M->globals().begin(), M->globals().end());
+
+  std::vector<int> CallsPerFunction;
+  for (Function &F : *M) {
+    if (!F.isDeclaration()) {
+      // Function Info
+      FunctionCount++;
+      int FunctionCalls = 0;
+
+      // Loop Count
+      LoopInfo &LI = FAM->getResult<LoopAnalysis>(F);
+      LoopCount += std::distance(LI.begin(), LI.end());
+
+      for (BasicBlock &BB : F) {
+        InstructionCount += std::distance(BB.begin(), BB.end());
+        for (Instruction &I : BB) {
+          // Load and Store Count
+          if (isa<LoadInst>(I)) {
+            LoadInstructionCount += 1;
+          }
+          if (isa<StoreInst>(I)) {
+            StoreInstructionCount += 1;
+          }
+          // Function Calls Count
+          if (auto *CB = dyn_cast<CallBase>(&I)) {
+            if (Function *Callee = CB->getCalledFunction()) {
+              if (!Callee->isDeclaration()) {
+                FunctionCalls += 1;
+              }
+            }
+          }
+        }
+        BBCount += std::distance(F.begin(), F.end());
+        CallsPerFunction.push_back(FunctionCalls);
+      }
+    }
+  }
+
+  // Function Calls Analysis
+  std::sort(CallsPerFunction.begin(), CallsPerFunction.end());
+  int MedianCallsPerFunction = CallsPerFunction[FunctionCount / 2];
+  int TotalFunctionCalls = 0;
+  for (int Calls : CallsPerFunction) {
+    TotalFunctionCalls += Calls;
+  }
+  // Average per Function Analysis
+  double AverageCallsPerFunction = 1.0 * TotalFunctionCalls / FunctionCount;
+  double AverageBBPerFunction = 1.0 * BBCount / FunctionCount;
+  double AverageInstructionCount = 1.0 * InstructionCount / FunctionCount;
+  double AverageLoadInstructionCount =
+      1.0 * LoadInstructionCount / FunctionCount;
+  double AverageStoreInstructionCount =
+      1.0 * StoreInstructionCount / FunctionCount;
+  // Edge Count Analysis
+  int TotalEdgeCount = calculateEdges(M);
+  int CriticalEdgeCount = calculateCriticalEdges(M);
+
+  std::string FunctionCountStr = std::to_string(FunctionCount);
+  std::string BBCountStr = std::to_string(BBCount);
+  std::string AverageBBPerFunctionStr = std::to_string(AverageBBPerFunction);
+  std::string InstructionCountStr = std::to_string(InstructionCount);
+  std::string TotalFunctionCallsStr = std::to_string(TotalFunctionCalls);
+  std::string AverageCallsPerFunctionStr =
+      std::to_string(AverageCallsPerFunction);
+  std::string MedianCallsPerFunctionStr =
+      std::to_string(MedianCallsPerFunction);
+  std::string LoopCountStr = std::to_string(LoopCount);
+  std::string TotalEdgeCountStr = std::to_string(TotalEdgeCount);
+  std::string CriticalEdgeCountStr = std::to_string(CriticalEdgeCount);
+  std::string GlobalVariableCountStr = std::to_string(GlobalVariableCount);
+  std::string AverageInstructionCountStr =
+      std::to_string(AverageInstructionCount);
+  std::string LoadInstructionCountStr =
+      std::to_string(AverageLoadInstructionCount);
+  std::string StoreInstructionCountStr =
+      std::to_string(AverageStoreInstructionCount);
+
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::FunctionCount, Info,
+      FunctionCountStr);
+  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::TotalBBCount,
+                             Info, BBCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::AverageBBPerFunction, Info,
+      AverageBBPerFunctionStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::TotalInstructionCount, Info,
+      InstructionCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::TotalFunctionCalls, Info,
+      TotalFunctionCallsStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::AverageCallsPerFunction, Info,
+      AverageCallsPerFunctionStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::MedianCallsPerFunction, Info,
+      MedianCallsPerFunctionStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::AverageInstructionsPerFunction,
+      Info, AverageInstructionCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::AverageLoadInstructionsPerFunction,
+      Info, LoadInstructionCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::AverageStoreInstructionsPerFunction,
+      Info, StoreInstructionCountStr);
+  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::LoopCount,
+                             Info, LoopCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::TotalEdgeCount, Info,
+      TotalEdgeCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::CriticalEdgeCount, Info,
+      CriticalEdgeCountStr);
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::GlobalVariableCount, Info,
+      GlobalVariableCountStr);
 }
 
 void calculateHotColdCallSite(ProteanCollectFeatures &ACF,
@@ -1229,8 +1557,10 @@ void calculateIsInInnerLoop(ProteanCollectFeatures &ACF,
   // Get loop for CB's BB. And check whether the loop is an inner most loop.
   bool CallSiteInInnerLoop = false;
   for (auto &L : CallerLI) {
-    if (L->isInnermost() && L->contains(CB))
+    if (L->isInnermost() && L->contains(CB)) {
       CallSiteInInnerLoop = true;
+      break;
+    }
   }
 
   ACF.setFeatureValueAndInfo(
@@ -1358,9 +1688,8 @@ ProteanCollectFeatures::getFunctionLevel(const Function *F) {
   auto It = FunctionLevels.find(F);
   if (It == FunctionLevels.end()) {
     return std::nullopt;
-  } else {
-    return It->second;
   }
+  return It->second;
 }
 
 ProteanCollectFeatures::FeatureIndex
@@ -1804,7 +2133,16 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
   formatted_raw_ostream OS(RawOS);
   ModelDataProteanCollector MDC(OS, false, ProteanModelFile);
   bool IsCollected = false;
+
+  // Module level collection
+  MDC.collectFeatures(&M, IA, &FAM, &AM);
+  MDC.printRow(true, M);
+  MDC.printRow(false, M);
+
   for (Function &F : M) {
+    if (F.isDeclaration()) {
+      continue;
+    }
     for (BasicBlock &BB : F) {
       for (Instruction &I : BB) {
         if (auto *CB = dyn_cast<CallBase>(&I)) {
