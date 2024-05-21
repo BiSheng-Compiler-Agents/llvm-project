@@ -397,7 +397,7 @@ calculateModuleInfoCount(ProteanCollectFeatures &ACF,
 //          FeatureIdx -> Group, Group -> FeatureIdx
 //          FeatureIdx -> Calculating function
 #define REGISTER_NAME(INDEX_NAME, NAME)                                        \
-  { ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME }
+  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME}
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
     ProteanCollectFeatures::FeatureIndexToName{
         REGISTER_NAME(SROASavings, "sroa_savings"),
@@ -530,10 +530,8 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
 #undef REGISTER_NAME
 
 #define REGISTER_SCOPE(INDEX_NAME, NAME)                                       \
-  {                                                                            \
-    ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                          \
-        ProteanCollectFeatures::Scope::NAME                                    \
-  }
+  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                           \
+   ProteanCollectFeatures::Scope::NAME}
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
                          ProteanCollectFeatures::Scope>
     ProteanCollectFeatures::FeatureIndexToScope{
@@ -652,10 +650,8 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
 #undef REGISTER_SCOPE
 
 #define REGISTER_GROUP(INDEX_NAME, NAME)                                       \
-  {                                                                            \
-    ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                          \
-        ProteanCollectFeatures::GroupID::NAME                                  \
-  }
+  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                           \
+   ProteanCollectFeatures::GroupID::NAME}
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
                          ProteanCollectFeatures::GroupID>
     ProteanCollectFeatures::FeatureIndexToGroup{
@@ -810,7 +806,7 @@ const std::multimap<ProteanCollectFeatures::Scope,
                    ProteanCollectFeatures::FeatureIndex>(FeatureIndexToScope)};
 
 #define REGISTER_FUNCTION(INDEX_NAME, NAME)                                    \
-  { ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME }
+  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME}
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
                          ProteanCollectFeatures::CalculateFeatureFunction>
     ProteanCollectFeatures::CalculateFeatureMap{
@@ -1090,21 +1086,9 @@ std::vector<std::string> ProteanCollectFeatures::getAllFeatures() {
       LoopLevel.push_back(Info.second);
     }
   }
-
-  std::sort(ModuleLevel.begin(), ModuleLevel.end());
-  std::sort(FunctionLevel.begin(), FunctionLevel.end());
-  std::sort(LoopLevel.begin(), LoopLevel.end());
-
-  for (const auto &Feature : ModuleLevel) {
-    Res.push_back(Feature);
-  }
-  for (const auto &Feature : FunctionLevel) {
-    Res.push_back(Feature);
-  }
-  for (const auto &Feature : LoopLevel) {
-    Res.push_back(Feature);
-  }
-
+  Res.insert(Res.end(), ModuleLevel.begin(), ModuleLevel.end());
+  Res.insert(Res.end(), FunctionLevel.begin(), FunctionLevel.end());
+  Res.insert(Res.end(), LoopLevel.begin(), LoopLevel.end());
   return Res;
 }
 
@@ -1308,40 +1292,6 @@ void calculateFunctionInfo(ProteanCollectFeatures &ACF,
       AverageComponentSizeStr);
 }
 
-// Count number of edges where predecessor has more than one successor,
-// successor has more than one predecessor
-int calculateCriticalEdges(Module *M) {
-  int CriticalEdgeCount = 0;
-  for (Function &F : *M) {
-    for (BasicBlock &BB : F) {
-      int PredCount = std::distance(pred_begin(&BB), pred_end(&BB));
-      // BB must have >1 predecessor
-      if (PredCount <= 1) {
-        continue;
-      }
-      for (BasicBlock *Pred : predecessors(&BB)) {
-        // Pred must have >1 successor
-        if (Pred->getSingleSuccessor() == nullptr) {
-          CriticalEdgeCount += 1;
-        }
-      }
-    }
-  }
-  return CriticalEdgeCount;
-}
-
-// Total number of edges in the module
-int calculateEdges(Module *M) {
-  int EdgeCount = 0;
-  for (Function &F : *M) {
-    for (BasicBlock &BB : F) {
-      EdgeCount +=
-          std::distance(successors(&BB).begin(), successors(&BB).end());
-    }
-  }
-  return EdgeCount;
-}
-
 void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
                               const ProteanCollectFeatures::FeatureInfo &Info) {
   assert(Info.Idx == ProteanCollectFeatures::FeatureIndex::NumOfFeatures ||
@@ -1363,6 +1313,8 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
   int LoopCount = 0;
   int LoadInstructionCount = 0;
   int StoreInstructionCount = 0;
+  int CriticalEdgeCount = 0;
+  int TotalEdgeCount = 0;
 
   std::vector<int> CallsPerFunction;
   for (Function &F : *M) {
@@ -1375,6 +1327,8 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
       LoopCount += std::distance(LI.begin(), LI.end());
       for (BasicBlock &BB : F) {
         InstructionCount += std::distance(BB.begin(), BB.end());
+        TotalEdgeCount +=
+            std::distance(successors(&BB).begin(), successors(&BB).end());
         for (Instruction &I : BB) {
           // Load and Store Count
           if (isa<LoadInst>(I)) {
@@ -1389,6 +1343,17 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
               if (!Callee->isDeclaration()) {
                 FunctionCalls += 1;
               }
+            }
+          }
+        }
+
+        int PredCount = std::distance(pred_begin(&BB), pred_end(&BB));
+        // BB must have >1 predecessor
+        if (PredCount > 1) {
+          for (BasicBlock *Pred : predecessors(&BB)) {
+            // Pred must have >1 successor
+            if (Pred->getSingleSuccessor() == nullptr) {
+              CriticalEdgeCount += 1;
             }
           }
         }
@@ -1415,9 +1380,6 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
       1.0 * LoadInstructionCount / FunctionCount;
   double AverageStoreInstructionCount =
       1.0 * StoreInstructionCount / FunctionCount;
-  // Edge Count Analysis
-  int TotalEdgeCount = calculateEdges(M);
-  int CriticalEdgeCount = calculateCriticalEdges(M);
   int GlobalVariableCount =
       std::distance(M->globals().begin(), M->globals().end());
 

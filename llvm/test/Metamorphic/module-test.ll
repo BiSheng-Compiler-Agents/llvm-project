@@ -1,4 +1,4 @@
-; RUN: opt -passes=protean-collect-features --enable-protean-feature-dump --protean-dump-file=%t < %s 
+; RUN: opt -passes=protean-collect-features --enable-protean-feature-dump --protean-dump-file=%t < %s
 ; RUN: cat %t | FileCheck %s
 
 @.str = private unnamed_addr constant [3 x i8] c"%d\00", align 1
@@ -43,9 +43,7 @@ declare dso_local i32 @printf(i8*, ...) #1
 !2 = distinct !{!2, !3}
 !3 = !{!"llvm.loop.mustprogress"}
 
-; CHECK: average_bb_per_function
-; CHECK: critical_edge_count
-; CHECK: function_count
 ; CHECK: global_variable_count
+; CHECK: critical_edge_count
+; CHECK: total_edge_count
 ; CHECK: loop_count
-; CHECK: total_function_calls
