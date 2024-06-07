@@ -143,6 +143,7 @@ add_llvm_component_library(LLVMAnalysis
   InteractiveModelRunner.cpp
   KernelInfo.cpp
   LastRunTrackingAnalysis.cpp
+  IR2Score.cpp
   LazyBranchProbabilityInfo.cpp
   LazyBlockFrequencyInfo.cpp
   LazyCallGraph.cpp

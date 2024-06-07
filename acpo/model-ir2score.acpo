@@ -1,0 +1,7 @@
+ModelName=IR2SCORE
+Features={PartialOptSizeThreshold, float32},{AllowRemainder, float32},{UnrollRemainder, float32},{AllowExpensiveTripCount, float32},{Force, float32},{TripCount, float32},{MaxTripCount, float32},{Size, float32},{InitialIVValueInt, float32},{FinalIVValueInt, float32},{StepValueInt, float32},{NumPartitions, float32},{IndVarSetSize, float32},{AvgStoreSetSize, float32},{AvgNumInsts, float32},{NumLoadInstPerLoopNest, float32},{NumStoreInstPerLoopNest, float32},{TotLoopNestInstCount, float32},{AvgNumLoadInstPerLoopNest, float32},{AvgNumStoreInstPerLoopNest, float32},{NumLoadInstPerLoop, float32},{NumStoreInstPerLoop, float32},{TotLoopInstCount, float32},{AvgNumLoadInstPerLoop, float32},{AvgNumStoreInstPerLoop, float32},{IsInnerMostLoop, float32},{IsOuterMostLoop, float32},{MaxLoopHeight, float32},{TotBlocksPerLoop, float32},{IsFixedTripCount, float32}
+Outputs={LU-Count, int64},{LU-Type, int64}
+Signature=serving_default
+ModelDirectory=./models/pir2score.pb
+OutputKey=output_0
+ModelInference=LUInference
