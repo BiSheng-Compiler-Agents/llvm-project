@@ -809,9 +809,13 @@ int main(int argc, char **argv) {
             SAProtean.getCurState(), PassMap);
       }
       LLVM_DEBUG(dbgs() << "Running Recipe: " << Recipes << "\n");
+
       if (!Pipeline.empty())
-        Pipeline += ",";
+        Pipeline += ",verify,";
+      else
+        Pipeline += "verify,";
       Pipeline += Recipes;
+      Pipeline += ",loop-collect-features";
       LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
     }
 

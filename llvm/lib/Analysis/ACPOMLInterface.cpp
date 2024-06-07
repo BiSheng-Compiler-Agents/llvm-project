@@ -14,7 +14,9 @@
 
 #include "llvm/Analysis/ACPOMLInterface.h"
 #include "llvm/Analysis/ACPOModelRunner.h"
+#include "llvm/Analysis/IR2ScoreModelRunner.h"
 #include "llvm/Analysis/TensorSpec.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
@@ -145,17 +147,17 @@ ACPOMLPythonInterface::ACPOMLPythonInterface() : NextID{0} {
     }
   }
 
-  int32_t PID = (int32_t) llvm::sys::Process::getProcessId();
+  int32_t PID = (int32_t)llvm::sys::Process::getProcessId();
   std::string ExecPython = "/usr/bin/python3";
-  std::string
-      PythonScript = *Env + "/" + std::string(ACPO_ML_PYTHON_INTERFACE_PY);
+  std::string PythonScript =
+      *Env + "/" + std::string(ACPO_ML_PYTHON_INTERFACE_PY);
   std::string PIDStr = std::to_string(PID);
   std::string TimeStr = std::to_string(time(nullptr));
   std::string NameOut =
       *Env + "/" + ACPO_PIPE_PREFIX + "_CMD_" + PIDStr + "_" + TimeStr;
   std::string NameIn =
       *Env + "/" + ACPO_PIPE_PREFIX + "_RESP_" + PIDStr + "_" + TimeStr;
-  StringRef Args[] = { ExecPython, PythonScript, NameOut, NameIn };
+  StringRef Args[] = {ExecPython, PythonScript, NameOut, NameIn};
 
   // Start a process and don't wait for it to finish. We want it running in
   // tandem.
@@ -199,7 +201,7 @@ ACPOMLPythonInterface::ACPOMLPythonInterface() : NextID{0} {
 }
 
 ACPOMLPythonInterface::~ACPOMLPythonInterface() {
-  if (SubProcess.Pid)
+  if (SubProcess.Pid && !UsingSimulatedAnnealing)
     closeMLInterface();
   if (PipeIn)
     fclose(PipeIn);
@@ -207,7 +209,7 @@ ACPOMLPythonInterface::~ACPOMLPythonInterface() {
     fclose(PipeOut);
   if (SubProcess.Pid) {
     // Wait for the MLInterface 3 seconds and kill it.
-    sys::Wait(SubProcess, 3) ;
+    sys::Wait(SubProcess, 3);
     SubProcess = sys::ProcessInfo{};
   }
   setInitialized(false);
@@ -223,6 +225,7 @@ bool ACPOMLPythonInterface::loadModel(std::string ModelSpecFile) {
   std::string Response = getResponse();
   std::vector<std::string> Tokens = tokenize(Response);
   if (Tokens[0] != RESPONSE_MODEL_LOADED) {
+    LLVM_DEBUG(dbgs() << "Tokens[0] != RESPONSE_MODEL_LOADED");
     return false;
   }
   if (Tokens[1] == RESPONSE_ALREADY_IN_DICT) {
@@ -590,6 +593,7 @@ bool ACPOMLPythonInterface::runModel(std::string ModelName) {
                       << " is not active\n");
     return false;
   }
+  LLVM_DEBUG(dbgs() << "Python Model Running:\n");
   sendCommand("RunModel");
   std::string Response = getResponse();
   return (Response.find(RESPONSE_COMPLETED) == 0);
@@ -676,13 +680,14 @@ bool ACPOMLPythonInterface::releaseModel(std::string ModelName) {
 }
 
 bool ACPOMLPythonInterface::closeMLInterface() {
+  LLVM_DEBUG(llvm::dbgs() << "Closing Python ML Interface\n");
   sendCommand("CloseMLInterface");
   std::string Response = getResponse();
   return true;
 }
 
 void ACPOMLPythonInterface::sendCommand(const std::string &Command) {
-  fprintf(PipeOut,"%s\n", Command.c_str());
+  fprintf(PipeOut, "%s\n", Command.c_str());
   fflush(PipeOut);
   usleep(1);
 }
@@ -690,7 +695,7 @@ void ACPOMLPythonInterface::sendCommand(const std::string &Command) {
 void ACPOMLPythonInterface::sendCommand(
     const std::vector<std::string> &Features) {
   for (auto I = Features.begin(); I != Features.end(); I++) {
-    fprintf(PipeOut,"%s\n", I->c_str());
+    fprintf(PipeOut, "%s\n", I->c_str());
     fflush(PipeOut);
     usleep(1);
   }
@@ -1235,6 +1240,7 @@ bool ACPOMLCPPInterface::runModel(std::string ModelName) {
                       << " is not active\n");
     return false;
   }
+  LLVM_DEBUG(dbgs() << "CPPMLIF Model is running: " << ModelName << '\n');
   std::shared_ptr<llvm::ACPOModelRunner> Runner =
       RunnerMap.find(CurrentlyActiveModel)->second;
   return Runner->runModel();
@@ -1384,3 +1390,19 @@ std::shared_ptr<ACPOMLInterface> llvm::createPersistentCompiledMLIF() {
   return PersistentMLIF;
 }
 
+std::unique_ptr<ACPOModelRunner>
+createIR2Score(std::vector<std::pair<std::string, std::string>> Inputs,
+               StringRef Decision) {
+  // PLACEHOLDER
+  return NULL;
+}
+
+// Generate map using ifdefs for now, in the future we could have this
+// automatically populate using macros
+const std::unordered_map<std::string,
+                         ACPOMLCPPInterface::CreateModelRunnerFunction>
+    ACPOMLCPPInterface::CreateModelRunnerMap = {
+        {"IR2SCORE", createIR2Score},
+};
+
+#endif // BSPRIV_COMMON_ACPO
