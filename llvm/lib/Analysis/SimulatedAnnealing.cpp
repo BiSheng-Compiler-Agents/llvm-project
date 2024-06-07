@@ -14,13 +14,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/SimulatedAnnealing.h"
+#include "llvm/Analysis/IR2Score.h"
+#include "llvm/Analysis/ModelDataCollector.h"
 #include "llvm/Analysis/PhaseOrder.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -28,13 +32,56 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <llvm/IR/LLVMContext.h>
+#include <memory>
 #include <random>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #undef DEBUG_TYPE
 #define DEBUG_TYPE "protean"
+namespace llvm {
+class ModelDataScoreCollector : public ModelDataCollector {
+public:
+  ModelDataScoreCollector(formatted_raw_ostream &OS, std::string OutputFileName)
+      : ModelDataCollector(OS, OutputFileName) {}
 
+  void collectFeatures(std::unique_ptr<Module> &M) {
+    std::vector<std::string> keys;
+    keys.push_back("proteanFeatureHeaders");
+    keys.push_back("proteanFeatureValues");
+    std::vector<std::string> headers;
+    std::vector<std::string> values;
+    for (auto key : keys) {
+      // Get the module flag
+      llvm::Metadata *flag = M->getModuleFlag(key);
+      // Check if the module flag exists and is an array
+      if (llvm::MDNode *arrayNode =
+              llvm::dyn_cast_or_null<llvm::MDNode>(flag)) {
+        // Iterate over array elements
+        for (unsigned i = 0, e = arrayNode->getNumOperands(); i < e; ++i) {
+          llvm::Metadata *element = arrayNode->getOperand(i);
+          if (llvm::MDString *mdString =
+                  llvm::dyn_cast<llvm::MDString>(element)) {
+            llvm::StringRef stringValue = mdString->getString();
+            if (key == "proteanFeatureHeaders") {
+              headers.push_back(stringValue.str());
+            } else {
+              values.push_back(stringValue.str());
+            }
+          }
+        }
+      } else {
+        llvm::outs() << "Module flag with key '" << key
+                     << "' not found or not an array.\n";
+      }
+    }
+    for (int i = 0; i < headers.size(); i++) {
+      Features.insert(Features.end(), {std::make_pair(headers[i], values[i])});
+    }
+  }
+};
+} // namespace llvm
 SimulatedAnnealingProtean::SimulatedAnnealingProtean(
     CoolingType CoolingSchedule, unsigned int MaxIterations,
     IRCostFunction CostType, std::string OutputFilename)
@@ -121,7 +168,70 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
 double
 SimulatedAnnealingProtean::irAnalysisCost(SimulatedAnnealingProtean::State &S,
                                           std::string OutputFilename) {
-  return 0.0;
+  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  llvm::LLVMContext Context;
+  llvm::SMDiagnostic Err;
+  std::unique_ptr<llvm::Module> M =
+      llvm::parseIRFile(OutputFilename, Err, Context);
+  if (!M) {
+    Err.print("IR parsing error", llvm::errs());
+    return 1;
+  }
+
+  std::error_code EC;
+  std::string SAModelFile = "Simulated-annealing-model";
+  llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
+                             llvm::sys::fs::FA_Write, llvm::sys::fs::OF_Append);
+  llvm::formatted_raw_ostream OS(RawOS);
+  llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
+  MDC.collectFeatures(M);
+  std::vector<std::pair<std::string, std::string>> Features = MDC.getFeatures();
+  std::unique_ptr<llvm::IR2ScoreModel> IRModel =
+      std::make_unique<llvm::IR2ScoreModel>(&Context);
+  // std::vector<std::string> LUFeatures{"PartialOptSizeThreshold",
+  //                                     "AllowRemainder",
+  //                                     "UnrollRemainder",
+  //                                     "AllowExpensiveTripCount",
+  //                                     "Force",
+  //                                     "TripCount",
+  //                                     "MaxTripCount",
+  //                                     "Size",
+  //                                     "InitialIVValueInt",
+  //                                     "FinalIVValueInt",
+  //                                     "StepValueInt",
+  //                                     "NumPartitions",
+  //                                     "IndVarSetSize",
+  //                                     "AvgStoreSetSize",
+  //                                     "AvgNumInsts",
+  //                                     "NumLoadInstPerLoopNest",
+  //                                     "NumStoreInstPerLoopNest",
+  //                                     "TotLoopNestInstCount",
+  //                                     "AvgNumLoadInstPerLoopNest",
+  //                                     "AvgNumStoreInstPerLoopNest",
+  //                                     "NumLoadInstPerLoop",
+  //                                     "NumStoreInstPerLoop",
+  //                                     "TotLoopInstCount",
+  //                                     "AvgNumLoadInstPerLoop",
+  //                                     "AvgNumStoreInstPerLoop",
+  //                                     "IsInnerMostLoop",
+  //                                     "IsOuterMostLoop",
+  //                                     "MaxLoopHeight",
+  //                                     "TotBlocksPerLoop",
+  //                                     "IsFixedTripCount"};
+  // std::vector<std::pair<std::string, std::string>> LUFeaturePairs;
+
+  // for (auto feature : LUFeatures) {
+  //   LUFeaturePairs.push_back(std::make_pair(feature, "1.0"));
+  // }
+  IRModel->setMLCustomFeatures(Features);
+  std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();
+  llvm::Constant *Val = Score->getField("IRSCORE");
+  assert(Val != nullptr);
+  assert(llvm::isa<llvm::ConstantInt>(Val));
+  llvm::ConstantInt *ACPOInline = llvm::dyn_cast<llvm::ConstantInt>(Val);
+  int Cost = ACPOInline->getSExtValue();
+  CostMap[RecipeStr] = Cost;
+  return Cost;
 }
 
 double
