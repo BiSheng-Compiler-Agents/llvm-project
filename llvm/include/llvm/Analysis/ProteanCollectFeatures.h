@@ -17,6 +17,7 @@
 #define LLVM_ANALYSIS_PROTEANCOLLECTFEATURES_H
 
 #include "llvm/Analysis/InlineAdvisor.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -28,6 +29,19 @@
 #include <vector>
 
 namespace llvm {
+class LPMUpdater;
+class Loop;
+
+class LoopCollectFeaturesPass : public PassInfoMixin<LoopCollectFeaturesPass> {
+public:
+  PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
+                        LoopStandardAnalysisResults &LAR, LPMUpdater &U);
+};
+
+struct CollectFeaturesPass : PassInfoMixin<CollectFeaturesPass> {
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
+
 class ProteanFIExtendedFeatures {
 public:
   enum class NamedFeatureIndex : size_t {
@@ -138,6 +152,12 @@ public:
     HotColdCallSite,
     InlineCostFeatureGroup,
     ProteanFIExtendedFeatures,
+    LoopInstFeatures,
+    TripCountFeatures,
+    IVRelatedFeatures,
+    LoopSetSizeFeatures,
+    InnerOuterFeatures,
+
     NumOfGroupID
   };
 
@@ -260,6 +280,46 @@ public:
     IsMustTailCall,
     IsTailCall,
 
+    // Begin: TripCountFeatures
+    TripCount,
+    MaxTripCount,
+    IsFixedTripCount,
+    // End: TripcountFeatures
+
+    LoopSize,
+
+    // Begin: IVRelatedFeatures
+    InitialIVValueInt,
+    FinalIVValueInt,
+    StepValueInt,
+    // End: IVRelatedFeatures
+
+    // Begin: LoopSetSizeFeatures
+    NumPartitions,
+    IndVarSetSize,
+    AvgStoreSetSize,
+    AvgNumInsts,
+    // End: LoopSetSizeFeatures
+
+    // Begin: LoopInstFeatures
+    NumLoadInstPerLoopNest,
+    NumStoreInstPerLoopNest,
+    TotLoopNestInstCount,
+    AvgNumLoadInstPerLoopNest,
+    NumLoadInstPerLoop,
+    NumStoreInstPerLoop,
+    TotLoopInstCount,
+    AvgNumLoadInstPerLoop,
+    TotBlocksPerLoop,
+    // End: LoopInstFeatures
+
+    // Begin: InnerOuterFeatures
+    IsInnerMostLoop,
+    IsOuterMostLoop,
+    // End: InnerOuterFeatures
+
+    MaxLoopHeight,
+
     SCCSize,
     AverageComponentSize,
     NumOfFeatures
@@ -299,6 +359,7 @@ public:
   struct AnalysisManagers {
     FunctionAnalysisManager *FAM = nullptr;
     ModuleAnalysisManager *MAM = nullptr;
+    LoopStandardAnalysisResults *AR = nullptr;
   };
 
   // ScopeInfo is a struct that contains the corresponding needed information to
@@ -402,6 +463,8 @@ public:
   static std::set<FeatureIndex> getGroupFeatures(GroupID Group);
   static std::set<FeatureIndex> getScopeFeatures(Scope S);
 
+  static std::vector<std::string> getAllFeatures();
+
   void clearFeatureValueMap();
   bool registeredFeature(FeatureIndex Idx) const;
 
@@ -467,10 +530,6 @@ ProteanCollectFeatures::FeatureIndex &
 operator++(ProteanCollectFeatures::FeatureIndex &);
 ProteanCollectFeatures::FeatureIndex
 operator++(ProteanCollectFeatures::FeatureIndex &, int);
-
-struct CollectFeaturesPass : PassInfoMixin<CollectFeaturesPass> {
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
-};
 
 const std::map<ProteanFIExtendedFeatures::NamedFeatureIndex, std::string>
     ProteanNamedFeatureIndexToName = {

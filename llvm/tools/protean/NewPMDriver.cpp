@@ -58,12 +58,12 @@ cl::opt<bool> VerifyEachDebugInfoPreserve(
     cl::desc("Start each pass with collecting and end it with checking of "
              "debug info preservation."));
 
-cl::opt<std::string>
-    VerifyDIPreserveExport("verify-di-preserve-export",
-                   cl::desc("Export debug info preservation failures into "
-                            "specified (JSON) file (should be abs path as we use"
-                            " append mode to insert new JSON objects)"),
-                   cl::value_desc("filename"), cl::init(""));
+cl::opt<std::string> VerifyDIPreserveExport(
+    "verify-di-preserve-export",
+    cl::desc("Export debug info preservation failures into "
+             "specified (JSON) file (should be abs path as we use"
+             " append mode to insert new JSON objects)"),
+    cl::value_desc("filename"), cl::init(""));
 
 } // namespace llvm
 
@@ -164,7 +164,6 @@ static cl::opt<bool> DisablePipelineVerification(
              "-print-pipeline-passes can be used to create a pipeline."),
     cl::Hidden);
 
-
 static cl::opt<PGOKind>
     PGOKindFlag("pgo-kind", cl::init(NoPGO), cl::Hidden,
                 cl::desc("The kind of profile guided optimization"),
@@ -175,8 +174,8 @@ static cl::opt<PGOKind>
                                       "Use instrumented profile to guide PGO."),
                            clEnumValN(SampleUse, "pgo-sample-use-pipeline",
                                       "Use sampled profile to guide PGO.")));
-static cl::opt<std::string> ProfileFile("profile-file",
-                                 cl::desc("Path to the profile."), cl::Hidden);
+static cl::opt<std::string>
+    ProfileFile("profile-file", cl::desc("Path to the profile."), cl::Hidden);
 static cl::opt<std::string>
     MemoryProfileFile("memory-profile-file",
                       cl::desc("Path to the memory profile."), cl::Hidden);
@@ -426,8 +425,7 @@ bool llvm::runPassPipeline(
   } else if (VerifyEachDebugInfoPreserve) {
     Debugify.setDebugInfoBeforePass(DebugInfoBeforePass);
     Debugify.setDebugifyMode(DebugifyMode::OriginalDebugInfo);
-    Debugify.setOrigDIVerifyBugsReportFilePath(
-      VerifyDIPreserveExport);
+    Debugify.setOrigDIVerifyBugsReportFilePath(VerifyDIPreserveExport);
     Debugify.registerCallbacks(PIC, MAM);
   }
 
@@ -510,6 +508,13 @@ bool llvm::runPassPipeline(
     break;
   }
   MPM.addPass(CollectFeaturesPass());
+  FunctionPassManager FPM;
+  LoopPassManager LPM;
+  LPM.addPass(LoopCollectFeaturesPass());
+
+  FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
+  MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM),
+                                                PTO.EagerlyInvalidateAnalyses));
   // Before executing passes, print the final values of the LLVM options.
   cl::PrintOptionValues();
 

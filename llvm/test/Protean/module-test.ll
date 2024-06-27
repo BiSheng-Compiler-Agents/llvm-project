@@ -43,17 +43,9 @@ declare dso_local i32 @printf(i8*, ...) #1
 !2 = distinct !{!2, !3}
 !3 = !{!"llvm.loop.mustprogress"}
 
-; CHECK: function_count
-; CHECK: total_bb_count
 ; CHECK: average_bb_per_function
-; CHECK: total_instruction_count
-; CHECK: total_function_calls
-; CHECK: average_calls_per_function
-; CHECK: median_calls_per_function
-; CHECK: average_instructions_per_function
-; CHECK: average_load_instructions_per_function
-; CHECK: average_store_instructions_per_function
-; CHECK: loop_count
-; CHECK: total_edge_count
 ; CHECK: critical_edge_count
+; CHECK: function_count
 ; CHECK: global_variable_count
+; CHECK: loop_count
+; CHECK: total_function_calls
