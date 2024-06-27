@@ -44,6 +44,7 @@ class MemorySSA;
 class ScalarEvolution;
 class TargetLibraryInfo;
 class TargetTransformInfo;
+class LoopReuseResult;
 
 /// The adaptor from a function pass to a loop pass computes these analyses and
 /// makes them available to the loop passes "for free". Each loop pass is
@@ -54,6 +55,7 @@ struct LoopStandardAnalysisResults {
   AssumptionCache &AC;
   DominatorTree &DT;
   LoopInfo &LI;
+  LoopReuseResult &LR;
   ScalarEvolution &SE;
   TargetLibraryInfo &TLI;
   TargetTransformInfo &TTI;

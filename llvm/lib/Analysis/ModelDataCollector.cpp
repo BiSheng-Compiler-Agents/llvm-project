@@ -32,9 +32,9 @@ extern cl::opt<std::string> InputFile;
 // Defined in 'lib/IR/AsmWriter.cpp'
 extern cl::opt<std::string> UnnamedVariablePrefix;
 
-static cl::opt<std::string> IRFileDirectory(
-    "IR-file-directory", cl::Hidden,
-    cl::desc("Name of a directory to store IR files."));
+static cl::opt<std::string>
+    IRFileDirectory("IR-file-directory", cl::Hidden,
+                    cl::desc("Name of a directory to store IR files."));
 
 cl::opt<std::string>
     ACPOModelFile("acpo-dump-file", cl::init("-"), cl::Hidden,
@@ -42,23 +42,27 @@ cl::opt<std::string>
 cl::opt<std::string>
     ProteanModelFile("protean-dump-file", cl::init("-"), cl::Hidden,
                      cl::desc("Name of a file to store feature data in."));
+cl::opt<std::string> ProteanLoopModelFile(
+    "protean-loop-dump-file", cl::init("-"), cl::Hidden,
+    cl::desc("Name of a file to store loop feature data in."));
 
 std::string ModelDataCollector::getDumpOptionAsString(DumpOption DO) {
   switch (DO) {
-    case DumpOption::loop:
-      return "loop";
-    case DumpOption::function:
-      return "function";
-    case DumpOption::before:
-      return "before";
-    case DumpOption::after:
-      return "after";
-    default:
-      return "";
+  case DumpOption::loop:
+    return "loop";
+  case DumpOption::function:
+    return "function";
+  case DumpOption::before:
+    return "before";
+  case DumpOption::after:
+    return "after";
+  default:
+    return "";
   }
 }
 
-std::vector<std::pair<std::string, std::string>> ModelDataCollector::getFeatures() {
+std::vector<std::pair<std::string, std::string>>
+ModelDataCollector::getFeatures() {
   return Features;
 }
 
@@ -176,16 +180,17 @@ std::string ModelDataCollector::demangleName(const std::string &Name) {
 }
 
 void ModelDataCollector::setFeatures(
-                std::vector<std::pair<std::string, std::string>> NewFeatures) {
+    std::vector<std::pair<std::string, std::string>> NewFeatures) {
   Features = NewFeatures;
 }
 
 void ModelDataCollector::addFeatures(
-                std::vector<std::pair<std::string, std::string>> NewFeatures) {
+    std::vector<std::pair<std::string, std::string>> NewFeatures) {
   Features.insert(Features.end(), NewFeatures.begin(), NewFeatures.end());
 }
 
-void ModelDataCollector::setIRFileNameMap(StringMap<std::string> IRFileNameMap) {
+void ModelDataCollector::setIRFileNameMap(
+    StringMap<std::string> IRFileNameMap) {
   IRFileNames = IRFileNameMap;
 }
 
@@ -200,7 +205,7 @@ void ModelDataCollector::printRow(bool printHeader) {
     Out << ",";
   }
 
-  for (unsigned I = 0, E = Features.size(); I != E; ++I ) {
+  for (unsigned I = 0, E = Features.size(); I != E; ++I) {
     // First value does not get a comma
     if (I)
       Out << ",";
@@ -224,14 +229,14 @@ std::string ModelDataCollector::getIRFileName(StringRef Key) {
 }
 
 std::unique_ptr<raw_ostream>
-ModelDataCollector::createFile(const Twine &FilePath,
-                               const Twine &FileName,
+ModelDataCollector::createFile(const Twine &FilePath, const Twine &FileName,
                                std::error_code &EC) {
   if (std::error_code EC = sys::fs::create_directories(FilePath))
-    errs() << "Error creating directory: " << FilePath << ": "
-           << EC.message() << "\n";
+    errs() << "Error creating directory: " << FilePath << ": " << EC.message()
+           << "\n";
 
-  return std::make_unique<raw_fd_ostream>((FilePath + "/" + FileName).str(), EC);
+  return std::make_unique<raw_fd_ostream>((FilePath + "/" + FileName).str(),
+                                          EC);
 }
 
 void ModelDataCollector::createIRFileForLoop(Loop *L, const Twine &IRFilePath,
@@ -245,7 +250,7 @@ void ModelDataCollector::createIRFileForLoop(Loop *L, const Twine &IRFilePath,
   auto OS = createFile(IRFilePath, Twine(IRFileName), EC);
   if (EC) {
     errs() << "Error creating loop IR file: " << IRFileName << ": "
-            << EC.message() << "\n";
+           << EC.message() << "\n";
     return;
   }
 
@@ -271,7 +276,7 @@ void ModelDataCollector::createIRFileForFunction(Function *F,
   auto OS = createFile(IRFilePath, Twine(IRFileName), EC);
   if (EC) {
     errs() << "Error creating function IR file: " << IRFileName << ": "
-            << EC.message() << "\n";
+           << EC.message() << "\n";
     return;
   }
 
@@ -313,18 +318,18 @@ void ModelDataCollector::writeIR(Loop *L, Function *F,
 
   // Create sub-directories to store corresponding IR files.
   // Directory name = before/after + pass_name + coderegion_type
-  std::string SubDir = getDumpOptionAsString(DumpBeforeOrAfter)
-                                  + "_" + PassName;
+  std::string SubDir =
+      getDumpOptionAsString(DumpBeforeOrAfter) + "_" + PassName;
   if (L && PrintLoop) {
     createIRFileForLoop(L,
                         Twine(IRFilePath) + "/" + SubDir + "_" +
                             getDumpOptionAsString(DumpOption::loop),
                         Twine(NewIRFileName), OverwriteIRFile);
     // Add IR file name for summary data file
-    IRFileNames.insert(std::pair<std::string, std::string> (
-                        getDumpOptionAsString(DumpBeforeOrAfter)
-                        + getDumpOptionAsString(DumpOption::loop),
-                        NewIRFileName));
+    IRFileNames.insert(std::pair<std::string, std::string>(
+        getDumpOptionAsString(DumpBeforeOrAfter) +
+            getDumpOptionAsString(DumpOption::loop),
+        NewIRFileName));
   }
 
   if (F && PrintFunction) {
@@ -333,9 +338,9 @@ void ModelDataCollector::writeIR(Loop *L, Function *F,
                                 getDumpOptionAsString(DumpOption::function),
                             Twine(NewIRFileName), OverwriteIRFile);
     // Add IR file name for summary data file
-    IRFileNames.insert(std::pair<std::string, std::string> (
-                        getDumpOptionAsString(DumpBeforeOrAfter)
-                        + getDumpOptionAsString(DumpOption::function),
-                        NewIRFileName));
+    IRFileNames.insert(std::pair<std::string, std::string>(
+        getDumpOptionAsString(DumpBeforeOrAfter) +
+            getDumpOptionAsString(DumpOption::function),
+        NewIRFileName));
   }
 }

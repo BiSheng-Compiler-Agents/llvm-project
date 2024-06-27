@@ -11,7 +11,7 @@ define dso_local void @sha_stream() #0 {
   ret void
 }
 
+; CHECK: block_freq
+; CHECK: Blocks
 ; CHECK: InitialSize
 ; CHECK: MaxLoopDepth
-; CHECK: Blocks
-; CHECK: block_freq

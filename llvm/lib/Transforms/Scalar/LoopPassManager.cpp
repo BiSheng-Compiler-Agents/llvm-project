@@ -8,6 +8,9 @@
 
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
+#include "llvm/Analysis/LoopReuseAnalysis.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -221,6 +224,7 @@ PreservedAnalyses FunctionToLoopPassAdaptor::run(Function &F,
                                      AM.getResult<AssumptionAnalysis>(F),
                                      AM.getResult<DominatorTreeAnalysis>(F),
                                      AM.getResult<LoopAnalysis>(F),
+                                     AM.getResult<LoopReuseAnalysisWrapper>(F),
                                      AM.getResult<ScalarEvolutionAnalysis>(F),
                                      AM.getResult<TargetLibraryAnalysis>(F),
                                      AM.getResult<TargetIRAnalysis>(F),
