@@ -32,8 +32,6 @@ public:
 
   void setContext(LLVMContext *Context);
 
-  void setProteanCollect(bool ProteanCollect);
-
 protected:
   // Interface to run the MLInference/default advisor and get advice from the
   // model/default advisor
@@ -47,5 +45,4 @@ private:
 
 } // end namespace llvm
 
-#endif // LLVM_ANALYSIS_IR2SCOREMODEL_H
 #endif // IR2SCORE_H

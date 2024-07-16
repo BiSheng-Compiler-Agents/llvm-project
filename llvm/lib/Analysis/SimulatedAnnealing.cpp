@@ -11,6 +11,9 @@
 // Implements the simulated annealing algorithm for the Metamorphic Code
 // Optimizer
 //
+// Requirements:
+// export BISHENG_ACPO_DIR=$LLVM_DIR/acpo
+// export IR2VEC_PATH=path/to/ir2vec
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/SimulatedAnnealing.h"
@@ -106,19 +109,21 @@ public:
 SimulatedAnnealingProtean::SimulatedAnnealingProtean(
     CoolingType CoolingSchedule, unsigned int MaxIterations,
     IRCostFunction CostType, std::string OutputFilename,
-    bool ProteanOutputTable)
+    bool ProteanOutputTable, bool UseProteanCollect)
     : Generator{new PhaseOrderGeneratorBase()},
       CoolingSchedule(CoolingSchedule), CostType(CostType),
       OutputFilename(OutputFilename), MaxTemperature(100.0), MinTemperature(1),
-      MaxIterations(MaxIterations), ProteanOutputTable(ProteanOutputTable) {
+      MaxIterations(MaxIterations), ProteanOutputTable(ProteanOutputTable),
+      UseProteanCollect(UseProteanCollect) {
   std::string RecipeStr = "01234";
   std::string current;
   generatePermutationsWithRepetitions(RecipeStr, current, RecipeStr.size());
-  int RngVal = 123;
+  const int RngVal = 123;
   AllRecipes =
       std::vector<std::string>(AllRecipesSet.begin(), AllRecipesSet.end());
   RandomEngine = std::default_random_engine{RngVal};
   std::shuffle(std::begin(AllRecipes), std::end(AllRecipes), RandomEngine);
+  LLVM_DEBUG(llvm::dbgs() << "Recipe size: " << AllRecipesSet.size() << '\n');
 }
 
 // Generate a random int from [Min, Max]
@@ -139,7 +144,6 @@ std::string formatDouble(double Num, int Precision) {
 void SimulatedAnnealingProtean::run() {
   SimulatedAnnealingProtean::State S = Generator->generateRecipe(AllRecipes, 0);
   SimulatedAnnealingProtean::State SNew = S;
-
   setCurState(SNew);
   setFinalState(SNew);
   for (int Iteration = 0; Iteration < this->MaxIterations; ++Iteration) {
@@ -148,13 +152,28 @@ void SimulatedAnnealingProtean::run() {
     double Temp = temperature(Iteration);
     LLVM_DEBUG(llvm::dbgs()
                << "Iteration " << Iteration << " Temperature:" << Temp << "\n");
+    int CacheSize = CachedCosts.size();
+    int Limit = 100;
+    if (CacheSize >= Limit) {
+      double LastCost = CachedCosts[CacheSize - 1];
+      bool Changing = false;
+      for (int i = CacheSize - 1; i >= std::max(CacheSize - Limit, 0); i--) {
+        if (CachedCosts[i] != LastCost) {
+          Changing = true;
+        }
+      }
+      if (!Changing) {
+        break;
+      }
+    }
+
     if (Temp <= 0.1) {
       break;
     }
 
     // Fork a new child process and compile with the new recipe.
-    // The parent process waits for the child proces to finish and then continue
-    // the  Simulated Annealing main loop.
+    // The parent process waits for the child process to finish and then
+    // continue the  Simulated Annealing main loop.
     pid_t Pid = fork();
     if (Pid != 0) {
       int Wstatus;
@@ -185,10 +204,10 @@ void SimulatedAnnealingProtean::run() {
          << PhaseOrderGeneratorBase::recipesToString(S) << std::setw(20)
          << PhaseOrderGeneratorBase::recipesToString(SNew) << std::setw(20)
          << PhaseOrderGeneratorBase::recipesToString(getFinalState())
-         << std::setw(20) << formatDouble(cost(S), 1) << std::setw(20)
-         << formatDouble(cost(SNew), 1) << std::setw(20)
-         << formatDouble(cost(getFinalState()), 1) << std::setw(20)
-         << (P >= Random ? "Y" : "N") << std::setw(20) << formatDouble(Temp, 1)
+         << std::setw(20) << formatDouble(cost(S), 3) << std::setw(20)
+         << formatDouble(cost(SNew), 3) << std::setw(20)
+         << formatDouble(cost(getFinalState()), 3) << std::setw(20)
+         << (P >= Random ? "Y" : "N") << std::setw(20) << formatDouble(Temp, 3)
          << "\n";
       llvm::dbgs() << ss.str();
     }
@@ -196,9 +215,17 @@ void SimulatedAnnealingProtean::run() {
       LLVM_DEBUG(llvm::dbgs() << "New state accepted\n");
       S = SNew;
     }
-    if (cost(getFinalState()) > cost(S)) {
-      setFinalState(S);
+
+    if (CostType == IRCostFunction::IRAnalysis) {
+      if (cost(getFinalState()) < cost(S)) {
+        setFinalState(S);
+      }
+    } else {
+      if (cost(getFinalState()) > cost(S)) {
+        setFinalState(S);
+      }
     }
+
     if (getFinalState() != SNew) {
       std::string NewOutputFilename = OutputFilename;
       NewOutputFilename.insert(
@@ -207,7 +234,7 @@ void SimulatedAnnealingProtean::run() {
       std::remove(NewOutputFilename.c_str());
     }
   }
-
+  LLVM_DEBUG(llvm::dbgs() << "Finished SA\n");
   setFinished(true);
 }
 
@@ -230,6 +257,75 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
   }
 }
 
+std::vector<std::string> splitByChar(const std::string &Input, char SplitChar) {
+  std::vector<std::string> Res;
+  std::stringstream StrStream = std::stringstream(Input);
+  std::string Line;
+  while (std::getline(StrStream, Line, SplitChar)) {
+    Res.push_back(Line);
+  }
+  return Res;
+}
+
+std::vector<std::pair<std::string, std::string>>
+SimulatedAnnealingProtean::ir2VecCollectFeatures(std::string OutputFilename) {
+  std::vector<std::pair<std::string, std::string>> Features;
+  std::optional<std::string> BishengAcpoDir =
+      llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
+  if (!BishengAcpoDir) {
+    llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
+    return {};
+  }
+  std::optional<std::string> IR2VecBinaryPath =
+      llvm::sys::Process::GetEnv("IR2VEC_PATH");
+  if (!IR2VecBinaryPath) {
+    llvm::errs() << "Please Export IR2VEC_PATH\n";
+    return {};
+  }
+
+  std::string IR2VecOutputPath = BishengAcpoDir.value() + "/ir2vec.output";
+  std::ofstream EraseFile(IR2VecOutputPath, std::ios::out | std::ios::trunc);
+  if (EraseFile.is_open()) {
+    EraseFile.close();
+  }
+
+  std::string Command = IR2VecBinaryPath.value() + " -fa -o " +
+                        IR2VecOutputPath + " -level p " + OutputFilename;
+  int Passed = system(Command.c_str());
+  if (Passed != 0) {
+    LLVM_DEBUG(llvm::dbgs() << "IR2Vec failed\n");
+    return {};
+  }
+
+  std::string NormalizePath =
+      "python3 " + BishengAcpoDir.value() + "/models/model_v1/normalize.py";
+  int NormPassed = system(NormalizePath.c_str());
+  if (NormPassed != 0) {
+    LLVM_DEBUG(llvm::dbgs() << "normalize.py failed\n");
+    return {};
+  }
+
+  std::ifstream IR2VecFile(IR2VecOutputPath);
+  if (IR2VecFile.is_open()) {
+    std::string Line;
+    while (std::getline(IR2VecFile, Line)) {
+      auto Values = splitByChar(Line, '\t');
+      LLVM_DEBUG(llvm::dbgs() << "Features: ");
+      for (int i = 0; i < Values.size(); i++) {
+        std::string Feature = "IR2Vec_" + std::to_string(i + 1);
+        Features.push_back({Feature, Values[i]});
+        LLVM_DEBUG(llvm::dbgs() << "{" << Feature << " " << Values[i] << "}");
+      }
+      LLVM_DEBUG(llvm::dbgs() << '\n');
+      break;
+    }
+    IR2VecFile.close();
+  } else {
+    LLVM_DEBUG(llvm::dbgs() << "Cannot read from IR2Vec.output\n");
+  }
+  return Features;
+}
+
 double SimulatedAnnealingProtean::irAnalysisCost(
     const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
@@ -241,59 +337,36 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     Err.print("IR parsing error", llvm::errs());
     return 1;
   }
-
-  std::error_code EC;
-  std::string SAModelFile = "Simulated-annealing-model";
-  llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
-                             llvm::sys::fs::FA_Write, llvm::sys::fs::OF_Append);
-  llvm::formatted_raw_ostream OS(RawOS);
-  llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
-  MDC.collectFeatures(M);
-  std::vector<std::pair<std::string, std::string>> Features = MDC.getFeatures();
+  std::vector<std::pair<std::string, std::string>> Features;
+  float Cost = 1;
+  if (UseProteanCollect) {
+    std::error_code EC;
+    std::string SAModelFile = "Simulated-annealing-model";
+    llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
+                               llvm::sys::fs::FA_Write,
+                               llvm::sys::fs::OF_Append);
+    llvm::formatted_raw_ostream OS(RawOS);
+    llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
+    MDC.collectFeatures(M);
+    Features = MDC.getFeatures();
+  } else {
+    Features = ir2VecCollectFeatures(OutputFilename);
+  }
+  if (Features.empty()) {
+    return -1.0;
+  }
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
       std::make_unique<llvm::IR2ScoreModel>(&Context);
-  // std::vector<std::string> LUFeatures{"PartialOptSizeThreshold",
-  //                                     "AllowRemainder",
-  //                                     "UnrollRemainder",
-  //                                     "AllowExpensiveTripCount",
-  //                                     "Force",
-  //                                     "TripCount",
-  //                                     "MaxTripCount",
-  //                                     "Size",
-  //                                     "InitialIVValueInt",
-  //                                     "FinalIVValueInt",
-  //                                     "StepValueInt",
-  //                                     "NumPartitions",
-  //                                     "IndVarSetSize",
-  //                                     "AvgStoreSetSize",
-  //                                     "AvgNumInsts",
-  //                                     "NumLoadInstPerLoopNest",
-  //                                     "NumStoreInstPerLoopNest",
-  //                                     "TotLoopNestInstCount",
-  //                                     "AvgNumLoadInstPerLoopNest",
-  //                                     "AvgNumStoreInstPerLoopNest",
-  //                                     "NumLoadInstPerLoop",
-  //                                     "NumStoreInstPerLoop",
-  //                                     "TotLoopInstCount",
-  //                                     "AvgNumLoadInstPerLoop",
-  //                                     "AvgNumStoreInstPerLoop",
-  //                                     "IsInnerMostLoop",
-  //                                     "IsOuterMostLoop",
-  //                                     "MaxLoopHeight",
-  //                                     "TotBlocksPerLoop",
-  //                                     "IsFixedTripCount"};
-  // std::vector<std::pair<std::string, std::string>> LUFeaturePairs;
-
-  // for (auto feature : LUFeatures) {
-  //   LUFeaturePairs.push_back(std::make_pair(feature, "1.0"));
-  // }
   IRModel->setMLCustomFeatures(Features);
   std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();
   llvm::Constant *Val = Score->getField("IRSCORE");
   assert(Val != nullptr);
-  assert(llvm::isa<llvm::ConstantInt>(Val));
-  llvm::ConstantInt *ACPOInline = llvm::dyn_cast<llvm::ConstantInt>(Val);
-  int Cost = ACPOInline->getSExtValue();
+  assert(llvm::isa<llvm::ConstantFP>(Val));
+  llvm::ConstantFP *IRScore = llvm::dyn_cast<llvm::ConstantFP>(Val);
+  auto &APCost = IRScore->getValueAPF();
+  Cost = APCost.convertToFloat();
+
+  LLVM_DEBUG(llvm::dbgs() << "Cost returned as " + std::to_string(Cost) + "\n");
   CostMap[RecipeStr] = Cost;
   return Cost;
 }
@@ -339,7 +412,7 @@ SimulatedAnnealingProtean::mcaCost(const SimulatedAnnealingProtean::State &S,
 
   // Read until end of process
   while (!feof(Pipe)) {
-    if (fgets(Buffer, 128, Pipe) != NULL)
+    if (fgets(Buffer, 128, Pipe) != nullptr)
       McaResult += Buffer;
   }
   pclose(Pipe);
@@ -354,6 +427,7 @@ SimulatedAnnealingProtean::mcaCost(const SimulatedAnnealingProtean::State &S,
       return Cycles;
     }
   }
+  return -1.0;
 }
 
 double SimulatedAnnealingProtean::instructionCountCost(
@@ -407,17 +481,19 @@ double SimulatedAnnealingProtean::probabilityOfNewState(
     double Temperature) {
   double CurrentCost = cost(S);
   double NewCost = cost(SNew);
+  CachedCosts.push_back(NewCost);
   if ((CurrentCost == -1) || (NewCost == -1)) {
     return -1;
   }
   double Diff = 100.0 * (NewCost - CurrentCost) / CurrentCost;
   LLVM_DEBUG(llvm::dbgs() << "Cost of new state: " << cost(SNew) << "\n");
   LLVM_DEBUG(llvm::dbgs() << "Cost of current state: " << cost(S) << "\n");
+
   // If new state is worse than old, use equation below to calculate
   // probability of accepting new state
   if (CostType == IRCostFunction::IRAnalysis) {
     if (Diff <= 0)
-      return exp(-1 * Diff / Temperature);
+      return exp(1 * Diff / Temperature);
   } else {
     if (Diff >= 0)
       return exp(-1 * Diff / Temperature);

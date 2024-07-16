@@ -197,6 +197,8 @@ PhaseOrderGeneratorBase::Recipes
 PhaseOrderGeneratorBase::generateRecipe(std::vector<std::string> &AllRecipes,
                                         int Iteration) {
   // For now just generate a random sequence.
+  int Sz = AllRecipes.size();
+  Iteration = std::min(Sz - 1, Iteration);
   std::string Recipe = AllRecipes[Iteration];
   std::vector<int> rs;
   for (auto i : Recipe) {
