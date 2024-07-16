@@ -60,6 +60,7 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Debugify.h"
 #include <algorithm>
+#include <iomanip>
 #include <memory>
 #include <filesystem>
 #include <optional>
@@ -300,10 +301,10 @@ static cl::opt<CoolingType> CoolingSchedule(
 static cl::opt<unsigned> MaxIterations(
     "max-iterations",
     cl::desc("Specify Maximum Iterations for Simulated Annealing"),
-    cl::init(100));
+    cl::init(500));
 
 static cl::opt<IRCostFunction> CostType(
-    "cost-type", cl::init(FileSize),
+    "cost-type", cl::init(IRAnalysis),
     cl::desc("Choose IR Cost Function used for Simulated Annealing"),
     cl::values(
         clEnumVal(FileSize, "Determine cost based on file size"),
@@ -315,6 +316,12 @@ static cl::opt<bool> ProteanOutputTable(
     "protean-output-table",
     cl::desc("Output Table of Simulated Annealing information"),
     cl::init(true));
+
+static cl::opt<bool>
+    UseProteanCollect("use-protean-collect",
+                      cl::desc("Use protean collect features for IR Analyzer"),
+                      cl::init(false));
+
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
 //
@@ -735,9 +742,9 @@ int main(int argc, char **argv) {
         return 1;
       }
 
-      SimulatedAnnealingProtean SAProtean =
-          SimulatedAnnealingProtean(CoolingSchedule, MaxIterations, CostType,
-                                    OutputFilename, ProteanOutputTable);
+      SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
+          CoolingSchedule, MaxIterations, CostType, OutputFilename,
+          ProteanOutputTable, UseProteanCollect);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       if (ProteanOutputTable) {
         std::stringstream ss;
@@ -799,8 +806,8 @@ int main(int argc, char **argv) {
       } else {
         // Reset the outputfile name for each recipe.
         // NOTE: For now we don't care about the remark files.
-        // TODO: Need the Simulated Annealing to keep track of already visited states thus we do
-        // reuse the same recipe in previous iterations.
+        // TODO: Need the Simulated Annealing to keep track of already visited
+        // states thus we do reuse the same recipe in previous iterations.
         std::string RecipeStr =
             PhaseOrderGeneratorBase::recipesToString(SAProtean.getCurState());
 
