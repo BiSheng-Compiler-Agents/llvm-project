@@ -1,11 +1,10 @@
-#if defined(BSPRIV_COMMON_ACPO)
 //===- IR2ScoreModel.cpp - Protean Compiler                      //-------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Copyright (C) 2022-2023. Huawei Technologies Co., Ltd. All rights reserved.
+// Copyright (C) 2024. Huawei Technologies Co., Ltd. All rights reserved.
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,7 +24,9 @@ IR2ScoreModel::IR2ScoreModel(LLVMContext *Context,
                              OptimizationRemarkEmitter *ORE, bool UseML)
     : ACPOModel(ORE, UseML) {
   setContextPtr(Context);
-  setMLIF(createPersistentCompiledMLIF());
+  setMLIF(createPersistentPythonMLIF());
+  std::shared_ptr<ACPOMLInterface> MLIF = getMLIF();
+  MLIF->setSimulatedAnnealing(true);
 }
 
 IR2ScoreModel::~IR2ScoreModel() {}
@@ -33,6 +34,8 @@ void IR2ScoreModel::setMLCustomFeatures(
     std::vector<std::pair<std::string, std::string>> FeatureValues) {
   CustomFeatureValues = FeatureValues;
 }
+
+void IR2ScoreModel::setContext(LLVMContext *Context) { setContextPtr(Context); }
 
 void IR2ScoreModel::sendCustomFeatures() {
   // Get an ACPOMLInterface to communicate with the Python side
@@ -46,20 +49,32 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   std::shared_ptr<ACPOMLInterface> MLIF = getMLIF();
   std::unique_ptr<ACPOAdvice> Score = std::make_unique<ACPOAdvice>();
   assert(MLIF != nullptr);
-  if (!MLIF->loadModel("model-ir2score.acpo") ||
-      !MLIF->initializeFeatures("IR2SCORE", CustomFeatureValues)) {
-    outs() << "Model not loaded or features not initialized. "
-           << "Did you export BISHENG_ACPO_DIR to $LLVM_DIR/acpo ?\n"
-           << "Falling back to default advisor. \n";
+
+  std::string ModelFile = "model-ir2score.acpo";
+  LLVM_DEBUG(llvm::dbgs() << "Loading model from IR2ScoreModel..\n");
+  if (!MLIF->loadModel(ModelFile)) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "Model not loaded. "
+               << "Did you export BISHENG_ACPO_DIR to $LLVM_DIR/acpo ?\n"
+               << "Falling back to default advisor. \n");
+    return NULL;
+  }
+  LLVM_DEBUG(llvm::dbgs() << "Loading features for IR2ScoreModel..\n");
+  if (!MLIF->initializeFeatures("IR2SCORE", CustomFeatureValues)) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "Features not initialized. "
+               << "Did you export BISHENG_ACPO_DIR to $LLVM_DIR/acpo ?\n"
+               << "Falling back to default advisor. \n");
     return NULL;
   }
   bool ModelRunOK = MLIF->runModel("IR2SCORE");
   assert(ModelRunOK);
-  bool ShouldInline = MLIF->getModelResultI("IRSCORE");
+  float IRScore = MLIF->getModelResultF("IRSCORE");
+  LLVM_DEBUG(llvm::dbgs() << "Found IRScore: " << IRScore << '\n');
   assert(getContextPtr() != nullptr);
-  Score->addField("IRSCORE",
-                  ConstantInt::get(Type::getInt64Ty(*(getContextPtr())),
-                                   (int64_t)ShouldInline));
+  Score->addField(
+      "IRSCORE",
+      ConstantFP::get(Type::getFloatTy(*(getContextPtr())), (float)IRScore));
   return Score;
 }
 
@@ -67,5 +82,3 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceNoML() {
   // Use the advisor used by default inlining
   return NULL;
 }
-
-#endif // BSPRIV_COMMON_ACPO

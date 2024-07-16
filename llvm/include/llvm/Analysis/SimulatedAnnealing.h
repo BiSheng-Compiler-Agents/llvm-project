@@ -16,7 +16,7 @@
 #ifndef SIMULATED_ANNEALING_H
 #define SIMULATED_ANNEALING_H
 
-#include "llvm/Analysis/PhaseOrder.h"
+#include "PhaseOrder.h"
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -84,14 +84,17 @@ public:
   double CoolingRate;
   unsigned int MaxIterations;
   bool ProteanOutputTable;
+  bool UseProteanCollect;
   std::unordered_map<std::string, double> CostMap;
+  std::vector<double> CachedCosts;
   std::set<std::string> AllRecipesSet;
   std::vector<std::string> AllRecipes;
   std::default_random_engine RandomEngine;
   SimulatedAnnealingProtean(CoolingType CoolingSchedule,
                             unsigned int MaxIterations, IRCostFunction CostType,
                             std::string OutputFileName,
-                            bool ProteanOutputTable);
+                            bool ProteanOutputTableGen,
+                            bool UseProteanCollectFeatures);
 
   using State = PhaseOrderGeneratorBase::Recipes;
   void run() override;
@@ -112,6 +115,8 @@ public:
   // Calculates cost based on instruction count
   double instructionCountCost(const State &S, std::string OutputFilename);
 
+  std::vector<std::pair<std::string, std::string>>
+  ir2VecCollectFeatures(std::string OutputFilename);
   // Calculates cost using an IR Analyzer
   double irAnalysisCost(const State &S, std::string OutputFilename);
 

@@ -1,4 +1,3 @@
-#if defined(BSPRIV_COMMON_ACPO)
 #ifndef IR2SCORE_H
 #define IR2SCORE_H
 //===- IR2ScoreModel.h - AI-Enabled Continuous Program Optimization
@@ -13,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ACPOModel.h"
+#include "llvm/IR/LLVMContext.h"
 
 namespace llvm {
 
@@ -30,6 +30,10 @@ public:
 
   void sendCustomFeatures() override;
 
+  void setContext(LLVMContext *Context);
+
+  void setProteanCollect(bool ProteanCollect);
+
 protected:
   // Interface to run the MLInference/default advisor and get advice from the
   // model/default advisor
@@ -43,5 +47,5 @@ private:
 
 } // end namespace llvm
 
+#endif // LLVM_ANALYSIS_IR2SCOREMODEL_H
 #endif // IR2SCORE_H
-#endif // BSPRIV_COMMON_ACPO

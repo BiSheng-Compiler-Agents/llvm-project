@@ -201,9 +201,13 @@ public:
   // Set a flag to invoke closeMLInterface when the instance of the class is
   // destroyed.
   void setCloseOnDestruction() { CloseOnDestruction = true; }
+  void setSimulatedAnnealing(bool UseSimulatedAnnealing) {
+    UsingSimulatedAnnealing = UseSimulatedAnnealing;
+  }
 
 protected:
   bool CloseOnDestruction = false;
+  bool UsingSimulatedAnnealing = false;
 
 private:
   bool Initialized = false;

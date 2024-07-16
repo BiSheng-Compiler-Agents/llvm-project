@@ -1404,5 +1404,3 @@ const std::unordered_map<std::string,
     ACPOMLCPPInterface::CreateModelRunnerMap = {
         {"IR2SCORE", createIR2Score},
 };
-
-#endif // BSPRIV_COMMON_ACPO
