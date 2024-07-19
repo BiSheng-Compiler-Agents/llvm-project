@@ -303,6 +303,9 @@ static cl::opt<unsigned> MaxIterations(
     cl::desc("Specify Maximum Iterations for Simulated Annealing"),
     cl::init(500));
 
+static cl::opt<bool> UseAOTModel("enable-protean-aot", cl::init(true),
+                                 cl::desc("Specify whether to use AOT"));
+
 static cl::opt<IRCostFunction> CostType(
     "cost-type", cl::init(IRAnalysis),
     cl::desc("Choose IR Cost Function used for Simulated Annealing"),
@@ -744,7 +747,7 @@ int main(int argc, char **argv) {
 
       SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
           CoolingSchedule, MaxIterations, CostType, OutputFilename,
-          ProteanOutputTable, UseProteanCollect);
+          ProteanOutputTable, UseProteanCollect, UseAOTModel);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       if (ProteanOutputTable) {
         std::stringstream ss;

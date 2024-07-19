@@ -1390,11 +1390,13 @@ std::shared_ptr<ACPOMLInterface> llvm::createPersistentCompiledMLIF() {
   return PersistentMLIF;
 }
 
+#ifdef LLVM_HAVE_TF_AOT_IR2SCORECOMPILEDMODEL
 std::unique_ptr<ACPOModelRunner>
 createIR2Score(std::vector<std::pair<std::string, std::string>> Inputs,
                StringRef Decision) {
   // PLACEHOLDER
-  return NULL;
+  LLVMContext Ctx;
+  return std::make_unique<IR2ScoreModelRunner>(Ctx, Inputs, Decision);
 }
 
 // Generate map using ifdefs for now, in the future we could have this
@@ -1403,4 +1405,5 @@ const std::unordered_map<std::string,
                          ACPOMLCPPInterface::CreateModelRunnerFunction>
     ACPOMLCPPInterface::CreateModelRunnerMap = {
         {"IR2SCORE", createIR2Score},
+#endif
 };

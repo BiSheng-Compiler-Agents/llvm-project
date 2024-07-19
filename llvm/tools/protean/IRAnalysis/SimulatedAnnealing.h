@@ -85,6 +85,7 @@ public:
   unsigned int MaxIterations;
   bool ProteanOutputTable;
   bool UseProteanCollect;
+  bool UseAOTModel;
   std::unordered_map<std::string, double> CostMap;
   std::vector<double> CachedCosts;
   std::set<std::string> AllRecipesSet;
@@ -94,7 +95,7 @@ public:
                             unsigned int MaxIterations, IRCostFunction CostType,
                             std::string OutputFileName,
                             bool ProteanOutputTableGen,
-                            bool UseProteanCollectFeatures);
+                            bool UseProteanCollectFeatures, bool UseAOT);
 
   using State = PhaseOrderGeneratorBase::Recipes;
   void run() override;
