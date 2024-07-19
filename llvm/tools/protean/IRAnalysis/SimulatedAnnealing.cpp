@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -109,12 +110,12 @@ public:
 SimulatedAnnealingProtean::SimulatedAnnealingProtean(
     CoolingType CoolingSchedule, unsigned int MaxIterations,
     IRCostFunction CostType, std::string OutputFilename,
-    bool ProteanOutputTable, bool UseProteanCollect)
+    bool ProteanOutputTable, bool UseProteanCollect, bool UseAOTModel)
     : Generator{new PhaseOrderGeneratorBase()},
       CoolingSchedule(CoolingSchedule), CostType(CostType),
       OutputFilename(OutputFilename), MaxTemperature(100.0), MinTemperature(1),
       MaxIterations(MaxIterations), ProteanOutputTable(ProteanOutputTable),
-      UseProteanCollect(UseProteanCollect) {
+      UseProteanCollect(UseProteanCollect), UseAOTModel(UseAOTModel) {
   std::string RecipeStr = "01234";
   std::string current;
   generatePermutationsWithRepetitions(RecipeStr, current, RecipeStr.size());
@@ -280,6 +281,12 @@ double SimulatedAnnealingProtean::irAnalysisCost(
   }
   std::vector<std::pair<std::string, std::string>> Features;
   float Cost = 1;
+  std::optional<std::string> BishengAcpoDir =
+      llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
+  if (!BishengAcpoDir) {
+    llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
+    return -1;
+  }
   if (UseProteanCollect) {
     std::error_code EC;
     std::string SAModelFile = "Simulated-annealing-model";
@@ -291,12 +298,6 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     MDC.collectFeatures(M);
     Features = MDC.getFeatures();
   } else {
-    std::optional<std::string> BishengAcpoDir =
-        llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
-    if (!BishengAcpoDir) {
-      llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
-      return -1;
-    }
     std::optional<std::string> IR2VecBinaryPath =
         llvm::sys::Process::GetEnv("IR2VEC_PATH");
     if (!IR2VecBinaryPath) {
@@ -321,13 +322,15 @@ double SimulatedAnnealingProtean::irAnalysisCost(
       return -1;
     }
 
-    std::string NormalizePath =
-        "python3 " + BishengAcpoDir.value() + "/models/model_v1/normalize.py";
-    const char *NormalizeCommand = NormalizePath.c_str();
-    int NormPassed = system(NormalizeCommand);
-    if (NormPassed != 0) {
-      LLVM_DEBUG(llvm::dbgs() << "normalize.py failed\n");
-      return -1;
+    if (!UseAOTModel) {
+      std::string NormalizePath =
+          "python3 " + BishengAcpoDir.value() + "/models/model_v1/normalize.py";
+      const char *NormalizeCommand = NormalizePath.c_str();
+      int NormPassed = system(NormalizeCommand);
+      if (NormPassed != 0) {
+        LLVM_DEBUG(llvm::dbgs() << "normalize.py failed\n");
+        return -1;
+      }
     }
 
     std::ifstream IR2VecFile(IR2VecOutputPath);
@@ -352,7 +355,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
   }
 
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
-      std::make_unique<llvm::IR2ScoreModel>(&Context);
+      std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel);
   IRModel->setProteanCollect(UseProteanCollect);
   IRModel->setMLCustomFeatures(Features);
   std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();

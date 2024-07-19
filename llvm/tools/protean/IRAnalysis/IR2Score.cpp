@@ -20,11 +20,16 @@ using namespace llvm;
 
 #define DEBUG_TYPE "ir2score"
 
-IR2ScoreModel::IR2ScoreModel(LLVMContext *Context,
+IR2ScoreModel::IR2ScoreModel(LLVMContext *Context, bool UseAOT,
                              OptimizationRemarkEmitter *ORE, bool UseML)
     : ACPOModel(ORE, UseML) {
   setContextPtr(Context);
-  setMLIF(createPersistentPythonMLIF());
+  if (UseAOT) {
+    setMLIF(createPersistentCompiledMLIF());
+  } else {
+    setMLIF(createPersistentPythonMLIF());
+  }
+  UseAOTModel = UseAOT;
   std::shared_ptr<ACPOMLInterface> MLIF = getMLIF();
   MLIF->setSimulatedAnnealing(true);
 }
@@ -74,6 +79,9 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   bool ModelRunOK = MLIF->runModel("IR2SCORE");
   assert(ModelRunOK);
   float IRScore = MLIF->getModelResultF("IRSCORE");
+  if (UseAOTModel) {
+    IRScore = IRScore * (YScaling[0] - YScaling[1]) + YScaling[1];
+  }
   LLVM_DEBUG(llvm::dbgs() << "Found IRScore: " << IRScore << '\n');
   assert(getContextPtr() != nullptr);
   Score->addField(
