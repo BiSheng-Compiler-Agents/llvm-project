@@ -24,8 +24,8 @@ class ACPOmodel;
 class IR2ScoreModel : public ACPOModel {
 public:
   bool UseProteanCollect = false;
-  IR2ScoreModel(LLVMContext *Context, OptimizationRemarkEmitter *ORE = NULL,
-                bool UseML = true);
+  IR2ScoreModel(LLVMContext *Context, bool UseAOT = true,
+                OptimizationRemarkEmitter *ORE = NULL, bool UseML = true);
 
   ~IR2ScoreModel();
 
@@ -47,8 +47,11 @@ protected:
 
 private:
   std::vector<std::pair<std::string, std::string>> CustomFeatureValues;
+  bool UseAOTModel;
+  std::vector<float> YScaling = {100.0, 0.0};
 };
 
 } // end namespace llvm
 
+#endif // LLVM_ANALYSIS_IR2SCOREMODEL_H
 #endif // IR2SCORE_H
