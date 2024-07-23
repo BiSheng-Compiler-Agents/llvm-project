@@ -43,6 +43,10 @@ void IR2ScoreModel::sendCustomFeatures() {
   MLIF->initializeFeatures("IR2SCORE", CustomFeatureValues);
 }
 
+void IR2ScoreModel::setProteanCollect(bool ProteanCollect) {
+  UseProteanCollect = ProteanCollect;
+}
+
 std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   // get performance results from module metadata
   // Get module flags
