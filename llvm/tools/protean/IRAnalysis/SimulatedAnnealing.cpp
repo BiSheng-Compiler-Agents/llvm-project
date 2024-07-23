@@ -267,65 +267,6 @@ std::vector<std::string> splitByChar(const std::string &Input, char SplitChar) {
   return Res;
 }
 
-std::vector<std::pair<std::string, std::string>>
-SimulatedAnnealingProtean::ir2VecCollectFeatures(std::string OutputFilename) {
-  std::vector<std::pair<std::string, std::string>> Features;
-  std::optional<std::string> BishengAcpoDir =
-      llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
-  if (!BishengAcpoDir) {
-    llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
-    return {};
-  }
-  std::optional<std::string> IR2VecBinaryPath =
-      llvm::sys::Process::GetEnv("IR2VEC_PATH");
-  if (!IR2VecBinaryPath) {
-    llvm::errs() << "Please Export IR2VEC_PATH\n";
-    return {};
-  }
-
-  std::string IR2VecOutputPath = BishengAcpoDir.value() + "/ir2vec.output";
-  std::ofstream EraseFile(IR2VecOutputPath, std::ios::out | std::ios::trunc);
-  if (EraseFile.is_open()) {
-    EraseFile.close();
-  }
-
-  std::string Command = IR2VecBinaryPath.value() + " -fa -o " +
-                        IR2VecOutputPath + " -level p " + OutputFilename;
-  int Passed = system(Command.c_str());
-  if (Passed != 0) {
-    LLVM_DEBUG(llvm::dbgs() << "IR2Vec failed\n");
-    return {};
-  }
-
-  std::string NormalizePath =
-      "python3 " + BishengAcpoDir.value() + "/models/model_v1/normalize.py";
-  int NormPassed = system(NormalizePath.c_str());
-  if (NormPassed != 0) {
-    LLVM_DEBUG(llvm::dbgs() << "normalize.py failed\n");
-    return {};
-  }
-
-  std::ifstream IR2VecFile(IR2VecOutputPath);
-  if (IR2VecFile.is_open()) {
-    std::string Line;
-    while (std::getline(IR2VecFile, Line)) {
-      auto Values = splitByChar(Line, '\t');
-      LLVM_DEBUG(llvm::dbgs() << "Features: ");
-      for (int i = 0; i < Values.size(); i++) {
-        std::string Feature = "IR2Vec_" + std::to_string(i + 1);
-        Features.push_back({Feature, Values[i]});
-        LLVM_DEBUG(llvm::dbgs() << "{" << Feature << " " << Values[i] << "}");
-      }
-      LLVM_DEBUG(llvm::dbgs() << '\n');
-      break;
-    }
-    IR2VecFile.close();
-  } else {
-    LLVM_DEBUG(llvm::dbgs() << "Cannot read from IR2Vec.output\n");
-  }
-  return Features;
-}
-
 double SimulatedAnnealingProtean::irAnalysisCost(
     const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
@@ -350,13 +291,69 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     MDC.collectFeatures(M);
     Features = MDC.getFeatures();
   } else {
-    Features = ir2VecCollectFeatures(OutputFilename);
+    std::optional<std::string> BishengAcpoDir =
+        llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
+    if (!BishengAcpoDir) {
+      llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
+      return -1;
+    }
+    std::optional<std::string> IR2VecBinaryPath =
+        llvm::sys::Process::GetEnv("IR2VEC_PATH");
+    if (!IR2VecBinaryPath) {
+      llvm::errs() << "Please Export IR2VEC_PATH\n";
+      return -1;
+    }
+
+    std::string IR2VecOutputPath = BishengAcpoDir.value() + "/ir2vec.output";
+    std::ofstream EraseFile(IR2VecOutputPath, std::ios::out | std::ios::trunc);
+    if (EraseFile.is_open()) {
+      EraseFile.close();
+    } else {
+      LLVM_DEBUG(llvm::dbgs() << "IR2Vec output not found\n");
+    }
+
+    std::string Command = IR2VecBinaryPath.value() + " -fa -o " +
+                          IR2VecOutputPath + " -level p " + OutputFilename;
+    const char *ConstCommand = Command.c_str();
+    int Passed = system(ConstCommand);
+    if (Passed != 0) {
+      LLVM_DEBUG(llvm::dbgs() << "IR2Vec failed\n");
+      return -1;
+    }
+
+    std::string NormalizePath =
+        "python3 " + BishengAcpoDir.value() + "/models/model_v1/normalize.py";
+    const char *NormalizeCommand = NormalizePath.c_str();
+    int NormPassed = system(NormalizeCommand);
+    if (NormPassed != 0) {
+      LLVM_DEBUG(llvm::dbgs() << "normalize.py failed\n");
+      return -1;
+    }
+
+    std::ifstream IR2VecFile(IR2VecOutputPath);
+    if (IR2VecFile.is_open()) {
+      std::string Line;
+      while (std::getline(IR2VecFile, Line)) {
+        auto Values = splitByChar(Line, '\t');
+        LLVM_DEBUG(llvm::dbgs() << "Features:");
+        for (int i = 0; i < Values.size(); i++) {
+          std::string Feature = "IR2Vec_";
+          Feature += std::to_string(i + 1);
+          Features.push_back({Feature, Values[i]});
+          LLVM_DEBUG(llvm::dbgs() << "{" << Feature << " " << Values[i] << "}");
+        }
+        LLVM_DEBUG(llvm::dbgs() << '\n');
+        break;
+      }
+      IR2VecFile.close();
+    } else {
+      LLVM_DEBUG(llvm::dbgs() << "Cannot read from IR2Vec.output\n");
+    }
   }
-  if (Features.empty()) {
-    return -1.0;
-  }
+
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
       std::make_unique<llvm::IR2ScoreModel>(&Context);
+  IRModel->setProteanCollect(UseProteanCollect);
   IRModel->setMLCustomFeatures(Features);
   std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();
   llvm::Constant *Val = Score->getField("IRSCORE");

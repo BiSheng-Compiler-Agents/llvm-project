@@ -11,6 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef LLVM_ANALYSIS_IR2SCOREMODEL_H
+#define LLVM_ANALYSIS_IR2SCOREMODEL_H
+
 #include "llvm/Analysis/ACPOModel.h"
 #include "llvm/IR/LLVMContext.h"
 
@@ -20,6 +23,7 @@ class ACPOmodel;
 
 class IR2ScoreModel : public ACPOModel {
 public:
+  bool UseProteanCollect = false;
   IR2ScoreModel(LLVMContext *Context, OptimizationRemarkEmitter *ORE = NULL,
                 bool UseML = true);
 
@@ -31,6 +35,8 @@ public:
   void sendCustomFeatures() override;
 
   void setContext(LLVMContext *Context);
+
+  void setProteanCollect(bool ProteanCollect);
 
 protected:
   // Interface to run the MLInference/default advisor and get advice from the
