@@ -29,6 +29,9 @@ set(LLVM_LINK_COMPONENTS
   Passes
   )
 
+add_subdirectory(IRAnalysis)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 add_llvm_tool(protean
   NewPMDriver.cpp
   protean.cpp
@@ -38,3 +41,5 @@ add_llvm_tool(protean
   SUPPORT_PLUGINS
   )
 export_executable_symbols_for_plugins(protean)
+
+target_link_libraries(protean PRIVATE ProteanAnalysis)
