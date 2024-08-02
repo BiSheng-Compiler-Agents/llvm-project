@@ -107,22 +107,42 @@ public:
   }
 };
 } // namespace llvm
+
+std::vector<std::string> splitByChar(const std::string &Input, char SplitChar) {
+  std::vector<std::string> Res;
+  std::stringstream StrStream = std::stringstream(Input);
+  std::string Line;
+  while (std::getline(StrStream, Line, SplitChar)) {
+    Res.push_back(Line);
+  }
+  return Res;
+}
+
 SimulatedAnnealingProtean::SimulatedAnnealingProtean(
-    CoolingType CoolingSchedule, unsigned int MaxIterations,
-    IRCostFunction CostType, std::string OutputFilename,
-    bool ProteanOutputTable, bool UseProteanCollect, bool UseAOTModel)
-    : Generator{new PhaseOrderGeneratorBase()},
-      CoolingSchedule(CoolingSchedule), CostType(CostType),
-      OutputFilename(OutputFilename), MaxTemperature(100.0), MinTemperature(1),
-      MaxIterations(MaxIterations), ProteanOutputTable(ProteanOutputTable),
-      UseProteanCollect(UseProteanCollect), UseAOTModel(UseAOTModel) {
+    int RngVal, CoolingType CoolingSchedule, double MaxTemperature,
+    double MinTemperature, unsigned int MaxIterations, IRCostFunction CostType,
+    std::string OutputFilename, bool ProteanOutputTable, bool UseProteanCollect,
+    bool UseAOTModel, unsigned int InitialSampleSize, double MutationRate,
+    double CrossoverRate, unsigned int PopulationSize,
+    CrossoverFunction CrossoverType, MutationFunction MutationType)
+    : Generator{new PhaseOrderGeneratorBase(InitialSampleSize, PopulationSize,
+                                            MutationRate, CrossoverRate,
+                                            CrossoverType, MutationType)},
+      RngVal(RngVal), CoolingSchedule(CoolingSchedule), CostType(CostType),
+      OutputFilename(OutputFilename), MaxTemperature(MaxTemperature),
+      MinTemperature(MinTemperature), MaxIterations(MaxIterations),
+      ProteanOutputTable(ProteanOutputTable),
+      UseProteanCollect(UseProteanCollect), UseAOTModel(UseAOTModel),
+      InitialSampleSize(InitialSampleSize), MutationRate(MutationRate),
+      CrossoverRate(CrossoverRate), PopulationSize(PopulationSize),
+      CrossoverType(CrossoverType), MutationType(MutationType) {
+  // Setting up the recipe string to 5
   std::string RecipeStr = "01234";
-  std::string current;
-  generatePermutationsWithRepetitions(RecipeStr, current, RecipeStr.size());
-  const int RngVal = 123;
+  std::string Current;
+  generatePermutationsWithRepetitions(RecipeStr, Current, RecipeStr.size());
   AllRecipes =
       std::vector<std::string>(AllRecipesSet.begin(), AllRecipesSet.end());
-  RandomEngine = std::default_random_engine{RngVal};
+  RandomEngine = std::default_random_engine{static_cast<unsigned long>(RngVal)};
   std::shuffle(std::begin(AllRecipes), std::end(AllRecipes), RandomEngine);
   LLVM_DEBUG(llvm::dbgs() << "Recipe size: " << AllRecipesSet.size() << '\n');
 }
@@ -143,14 +163,22 @@ std::string formatDouble(double Num, int Precision) {
 }
 
 void SimulatedAnnealingProtean::run() {
-  SimulatedAnnealingProtean::State S = Generator->generateRecipe(AllRecipes, 0);
+  SimulatedAnnealingProtean::State S =
+      Generator->generateRecipeGenetic(AllRecipes, "", 0, 100);
   SimulatedAnnealingProtean::State SNew = S;
   setCurState(SNew);
   setFinalState(SNew);
+  std::unordered_set<std::string> ExploredRecipes;
   for (int Iteration = 0; Iteration < this->MaxIterations; ++Iteration) {
-    SNew = Generator->generateRecipe(AllRecipes, Iteration);
-    setCurState(SNew);
     double Temp = temperature(Iteration);
+    if (Iteration != 0) {
+      SNew = Generator->generateRecipeGenetic(
+          AllRecipes, PhaseOrderGeneratorBase::recipesToString(S), Iteration,
+          Temp);
+    }
+    ExploredRecipes.insert(PhaseOrderGeneratorBase::recipesToString(SNew));
+
+    setCurState(SNew);
     LLVM_DEBUG(llvm::dbgs()
                << "Iteration " << Iteration << " Temperature:" << Temp << "\n");
     int CacheSize = CachedCosts.size();
@@ -205,9 +233,9 @@ void SimulatedAnnealingProtean::run() {
          << PhaseOrderGeneratorBase::recipesToString(S) << std::setw(20)
          << PhaseOrderGeneratorBase::recipesToString(SNew) << std::setw(20)
          << PhaseOrderGeneratorBase::recipesToString(getFinalState())
-         << std::setw(20) << formatDouble(cost(S), 3) << std::setw(20)
-         << formatDouble(cost(SNew), 3) << std::setw(20)
-         << formatDouble(cost(getFinalState()), 3) << std::setw(20)
+         << std::setw(20) << formatDouble(cost(S), 6) << std::setw(20)
+         << formatDouble(cost(SNew), 6) << std::setw(20)
+         << formatDouble(cost(getFinalState()), 6) << std::setw(20)
          << (P >= Random ? "Y" : "N") << std::setw(20) << formatDouble(Temp, 3)
          << "\n";
       llvm::dbgs() << ss.str();
@@ -235,6 +263,13 @@ void SimulatedAnnealingProtean::run() {
       std::remove(NewOutputFilename.c_str());
     }
   }
+  LLVM_DEBUG(llvm::dbgs() << "Explored Recipes Size: " << ExploredRecipes.size()
+                          << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "Recipes Set:");
+  for (auto &Recipe : ExploredRecipes) {
+    LLVM_DEBUG(llvm::dbgs() << " " << Recipe);
+  }
+  LLVM_DEBUG(llvm::dbgs() << "\n");
   LLVM_DEBUG(llvm::dbgs() << "Finished SA\n");
   setFinished(true);
 }
@@ -256,16 +291,6 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
   default:
     llvm_unreachable("Not a valid cooling schedule");
   }
-}
-
-std::vector<std::string> splitByChar(const std::string &Input, char SplitChar) {
-  std::vector<std::string> Res;
-  std::stringstream StrStream = std::stringstream(Input);
-  std::string Line;
-  while (std::getline(StrStream, Line, SplitChar)) {
-    Res.push_back(Line);
-  }
-  return Res;
 }
 
 double SimulatedAnnealingProtean::irAnalysisCost(
@@ -481,7 +506,11 @@ double SimulatedAnnealingProtean::probabilityOfNewState(
     double Temperature) {
   double CurrentCost = cost(S);
   double NewCost = cost(SNew);
+
   CachedCosts.push_back(NewCost);
+  Generator->updateBestRecipes(PhaseOrderGeneratorBase::recipesToString(SNew),
+                               NewCost);
+
   if ((CurrentCost == -1) || (NewCost == -1)) {
     return -1;
   }
