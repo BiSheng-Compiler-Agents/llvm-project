@@ -16,10 +16,10 @@
 // export IR2VEC_PATH=path/to/ir2vec
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/SimulatedAnnealing.h"
-#include "llvm/Analysis/IR2Score.h"
+#include "SimulatedAnnealing.h"
+#include "IR2Score.h"
+#include "PhaseOrder.h"
 #include "llvm/Analysis/ModelDataCollector.h"
-#include "llvm/Analysis/PhaseOrder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
