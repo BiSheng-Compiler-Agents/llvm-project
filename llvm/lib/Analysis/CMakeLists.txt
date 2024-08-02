@@ -141,9 +141,9 @@ add_llvm_component_library(LLVMAnalysis
   InstructionPrecedenceTracking.cpp
   InstructionSimplify.cpp
   InteractiveModelRunner.cpp
+  IR2Score.cpp
   KernelInfo.cpp
   LastRunTrackingAnalysis.cpp
-  IR2Score.cpp
   LazyBranchProbabilityInfo.cpp
   LazyBlockFrequencyInfo.cpp
   LazyCallGraph.cpp
@@ -180,7 +180,6 @@ add_llvm_component_library(LLVMAnalysis
   OptimizationRemarkEmitter.cpp
   OverflowInstAnalysis.cpp
   PHITransAddr.cpp
-  PhaseOrder.cpp
   PhiValues.cpp
   PostDominators.cpp
   ProfileSummaryInfo.cpp

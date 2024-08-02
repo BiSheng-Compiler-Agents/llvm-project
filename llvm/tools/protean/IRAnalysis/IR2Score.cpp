@@ -13,7 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/IR2Score.h"
+#include "IR2Score.h"
 #include "llvm/IR/LLVMContext.h"
 
 using namespace llvm;

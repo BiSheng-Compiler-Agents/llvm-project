@@ -13,13 +13,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "IRAnalysis/PhaseOrder.h"
+#include "IRAnalysis/SimulatedAnnealing.h"
 #include "NewPMDriver.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/PhaseOrder.h"
 #include "llvm/Analysis/RegionPass.h"
-#include "llvm/Analysis/SimulatedAnnealing.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/AsmParser/Parser.h"
