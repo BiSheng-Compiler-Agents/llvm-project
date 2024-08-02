@@ -301,7 +301,55 @@ static cl::opt<CoolingType> CoolingSchedule(
 static cl::opt<unsigned> MaxIterations(
     "max-iterations",
     cl::desc("Specify Maximum Iterations for Simulated Annealing"),
-    cl::init(500));
+    cl::init(100));
+
+static cl::opt<unsigned>
+    RngVal("rng-val", cl::desc("Specify RNG Val for Simulated Annealing"),
+           cl::init(123));
+
+static cl::opt<double> MaxTemperature(
+    "max-temperature",
+    cl::desc("Specify Maximum Temperature for Simulated Annealing"),
+    cl::init(100));
+
+static cl::opt<double> MinTemperature(
+    "min-temperature",
+    cl::desc("Specify Minimum Temperature for Simulated Annealing"),
+    cl::init(1));
+
+static cl::opt<unsigned> InitialSampleSize(
+    "initial-sample-size",
+    cl::desc(
+        "Specify Number of Initial Random Samples for Simulated Annealing"),
+    cl::init(20));
+
+static cl::opt<double>
+    MutationRate("mutation-rate",
+                 cl::desc("Specify Mutation Rate for Genetic Recommender"),
+                 cl::init(0.05));
+
+static cl::opt<double>
+    CrossoverRate("crossover-rate",
+                  cl::desc("Specify Crossover Rate for Genetic Recommender"),
+                  cl::init(0.95));
+
+static cl::opt<double>
+    PopulationSize("population-size",
+                   cl::desc("Specify Population Size for Genetic Recommender"),
+                   cl::init(10));
+
+static cl::opt<CrossoverFunction> CrossoverType(
+    "crossover-type", cl::init(SinglePoint),
+    cl::desc("Choose crossover method type for Genetic Recommender"),
+    cl::values(clEnumVal(SinglePoint, "Single point crossover method"),
+               clEnumVal(DoublePoint, "Double point crossover method"),
+               clEnumVal(Uniform, "Uniform crossover method")));
+
+static cl::opt<MutationFunction> MutationType(
+    "mutation-type", cl::init(FlipOne),
+    cl::desc("Choose mutation method type for Genetic Recommender"),
+    cl::values(clEnumVal(FlipOne, "Mutate one sequence mutation method"),
+               clEnumVal(SwapTwo, "Swap two sequences mutation method")));
 
 static cl::opt<bool> UseAOTModel("enable-protean-aot", cl::init(true),
                                  cl::desc("Specify whether to use AOT"));
@@ -746,8 +794,10 @@ int main(int argc, char **argv) {
       }
 
       SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
-          CoolingSchedule, MaxIterations, CostType, OutputFilename,
-          ProteanOutputTable, UseProteanCollect, UseAOTModel);
+          RngVal, CoolingSchedule, MaxTemperature, MinTemperature,
+          MaxIterations, CostType, OutputFilename, ProteanOutputTable,
+          UseProteanCollect, UseAOTModel, InitialSampleSize, MutationRate,
+          CrossoverRate, PopulationSize, CrossoverType, MutationType);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       if (ProteanOutputTable) {
         std::stringstream ss;

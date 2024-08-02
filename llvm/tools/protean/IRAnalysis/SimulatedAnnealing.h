@@ -76,6 +76,7 @@ private:
   std::unique_ptr<PhaseOrderGeneratorBase> Generator;
 
 public:
+  int RngVal;
   CoolingType CoolingSchedule;
   IRCostFunction CostType;
   std::string OutputFilename;
@@ -86,16 +87,27 @@ public:
   bool ProteanOutputTable;
   bool UseProteanCollect;
   bool UseAOTModel;
+  unsigned int InitialSampleSize;
+  double MutationRate;
+  double CrossoverRate;
+  unsigned int PopulationSize;
+  CrossoverFunction CrossoverType;
+  MutationFunction MutationType;
   std::unordered_map<std::string, double> CostMap;
   std::vector<double> CachedCosts;
   std::set<std::string> AllRecipesSet;
   std::vector<std::string> AllRecipes;
   std::default_random_engine RandomEngine;
-  SimulatedAnnealingProtean(CoolingType CoolingSchedule,
+  SimulatedAnnealingProtean(int RngVal, CoolingType CoolingSchedule,
+                            double MaxTemperature, double MinTemperature,
                             unsigned int MaxIterations, IRCostFunction CostType,
                             std::string OutputFileName,
                             bool ProteanOutputTableGen,
-                            bool UseProteanCollectFeatures, bool UseAOT);
+                            bool UseProteanCollectFeatures, bool UseAOT,
+                            unsigned int SampleSize, double MutationRate,
+                            double CrossoverRate, unsigned int PopulationSize,
+                            CrossoverFunction CrossoverType,
+                            MutationFunction MutationType);
 
   using State = PhaseOrderGeneratorBase::Recipes;
   void run() override;

@@ -20,13 +20,15 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #define REGISTER_RECIPE_TO_PASSES(RECIPE, ...)                                 \
-  { PhaseOrderGeneratorBase::Recipe::RECIPE, #__VA_ARGS__ }
+  {PhaseOrderGeneratorBase::Recipe::RECIPE, #__VA_ARGS__}
 // TODO: For some reason when trying to commit this file there will be
 // formatting issues.
 // TODO: Right now the __VA_ARGS__ has to be comma separated WITHOUT any spaces.
 // Find a way to get rid of all the spaces.
+// clang-format off
 std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
     PhaseOrderGeneratorBase::RecipeToPassOrders {
       REGISTER_RECIPE_TO_PASSES(A, globalopt,cgscc(devirt<4>(inline<only-mandatory>,inline,move-auto-init,function-attrs<skip-non-recursive-function-attrs>,argpromotion,function<eager-inv;no-rerun>(sroa<modify-cfg>,speculative-execution,tailcallelim,loop-mssa(licm<allowspeculation>,simple-loop-unswitch<nontrivial;trivial>),loop(loop-idiom,indvars,loop-deletion),loop-unroll<O3>,early-cse<>,callsite-splitting,sroa<modify-cfg>,early-cse<memssa>,speculative-execution,jump-threading,correlated-propagation,lower-expect,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,aggressive-instcombine,tailcallelim,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,reassociate))),),
@@ -36,9 +38,10 @@ std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
       REGISTER_RECIPE_TO_PASSES(E, function<eager-inv>(loop-simplify,lcssa,loop(loop-rotate<no-header-duplication;no-prepare-for-lto>,loop-deletion),loop-distribute,loop-simplify,lcssa,loop-unroll-and-jam,inject-tli-mappings,loop-vectorize<no-interleave-forced-only;vectorize-forced-only;>,infer-alignment,loop-load-elim,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,vector-combine,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-unroll<O3>,transform-warning,sroa<preserve-cfg>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-simplify,lcssa,loop-mssa(licm<allowspeculation>),alignment-from-assumptions,loop-sink,instsimplify,div-rem-pairs,tailcallelim,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,annotation-remarks),),
 };
 #undef REGISTER_RECIPE_TO_PASSES
+// clang-format on
 
 #define REGISTER_RECIPE_TO_STRING(RECIPE)                                      \
-  { PhaseOrderGeneratorBase::Recipe::RECIPE, #RECIPE }
+  {PhaseOrderGeneratorBase::Recipe::RECIPE, #RECIPE}
 std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
     PhaseOrderGeneratorBase::RecipeToString{
         REGISTER_RECIPE_TO_STRING(A), REGISTER_RECIPE_TO_STRING(B),
@@ -47,6 +50,14 @@ std::unordered_map<PhaseOrderGeneratorBase::Recipe, std::string>
 
     };
 #undef REGISTER_RECIPE_TO_STRING
+
+PhaseOrderGeneratorBase::PhaseOrderGeneratorBase(
+    int InitialSampleSize, unsigned int PopulationSize, double MutationRate,
+    double CrossoverRate, CrossoverFunction CrossoverType,
+    MutationFunction MutationType)
+    : InitialSampleSize(InitialSampleSize), PopulationSize(PopulationSize),
+      MutationRate(MutationRate), CrossoverRate(CrossoverRate),
+      CrossoverType(CrossoverType), MutationType(MutationType) {}
 
 int passTypeToInt(std::string PassType, PhaseOrderGeneratorBase::PMap &PassMap,
                   int PreviousPassNum) {
@@ -149,9 +160,9 @@ std::string PhaseOrderGeneratorBase::recipesToString(
 }
 
 // Generate a random int from [Min, Max]
+const int RngVal = 123;
+std::mt19937 Gen(RngVal);
 static int randInt(int Min, int Max) {
-  std::random_device RD;
-  std::mt19937 Gen(RD());
   std::uniform_int_distribution<> Distr(Min, Max);
   return Distr(Gen);
 }
@@ -160,19 +171,19 @@ static int randInt(int Min, int Max) {
 static std::vector<int> randomIntSeq(int Length, int Min, int Max) {
   std::vector<int> Ret;
 
-  for (int i = 0; i < Length; ++i) {
+  for (int I = 0; I < Length; ++I) {
     Ret.push_back(randInt(Min, Max));
   }
 
   return Ret;
 }
 
-static PhaseOrderGeneratorBase::Recipes convert(const std::vector<int> &in) {
+static PhaseOrderGeneratorBase::Recipes convert(const std::vector<int> &In) {
   PhaseOrderGeneratorBase::Recipes Out;
-  Out.reserve(in.size());
+  Out.reserve(In.size());
 
-  std::transform(in.begin(), in.end(), std::back_inserter(Out), [](int n) {
-    return static_cast<PhaseOrderGeneratorBase::Recipe>(n);
+  std::transform(In.begin(), In.end(), std::back_inserter(Out), [](int N) {
+    return static_cast<PhaseOrderGeneratorBase::Recipe>(N);
   });
 
   return Out;
@@ -193,16 +204,180 @@ PhaseOrderGeneratorBase::Recipes PhaseOrderGeneratorBase::generateRecipe(
   // For now just generate a random sequence.
   return generateRecipe();
 }
+
+bool chanceOutcome(int Probability) { return randInt(1, 100) <= Probability; }
+
+void PhaseOrderGeneratorBase::updateBestRecipes(std::string Recipe,
+                                                double Cost) {
+  BestRecipes.insert(std::make_pair(Cost, Recipe));
+  if (BestRecipes.size() > PopulationSize) {
+    BestRecipes.erase(*BestRecipes.begin());
+  }
+}
+
+std::string PhaseOrderGeneratorBase::getRandomBestRecipe() {
+  int Len = BestRecipes.size();
+  int Choice = randInt(1, Len);
+  for (auto &Recipe : BestRecipes) {
+    --Choice;
+    if (Choice == 0) {
+      return Recipe.second;
+    }
+  }
+  return "";
+}
+
+std::string PhaseOrderGeneratorBase::crossoverUniform(std::string Recipe1,
+                                                      std::string Recipe2) {
+  if (chanceOutcome(50)) {
+    swap(Recipe1, Recipe2);
+  }
+  int Len = Recipe1.size();
+  std::string Offspring;
+  for (int I = 0; I < Len; ++I) {
+    if (I >= Recipe2.size()) {
+      Offspring.push_back(Recipe1[I]);
+    } else if (chanceOutcome(50)) {
+      Offspring.push_back(Recipe1[I]);
+    } else {
+      Offspring.push_back(Recipe2[I]);
+    }
+  }
+  return Offspring;
+}
+
+std::string PhaseOrderGeneratorBase::crossoverOnePoint(std::string Recipe1,
+                                                       std::string Recipe2) {
+  if (chanceOutcome(50)) {
+    swap(Recipe1, Recipe2);
+  }
+  int Len = Recipe1.size();
+  std::string Offspring;
+  int Cutoff = randInt(0, Len - 1);
+  for (int I = 0; I < Len; I++) {
+    if (I >= Recipe2.size()) {
+      Offspring.push_back(Recipe1[I]);
+    } else if (I < Cutoff) {
+      Offspring.push_back(Recipe1[I]);
+    } else {
+      Offspring.push_back(Recipe2[I]);
+    }
+  }
+  return Offspring;
+}
+
+std::string PhaseOrderGeneratorBase::crossoverTwoPoint(std::string Recipe1,
+                                                       std::string Recipe2) {
+  if (chanceOutcome(50)) {
+    swap(Recipe1, Recipe2);
+  }
+  int Len = Recipe1.size();
+  std::string Offspring;
+  int Left = randInt(0, Len - 1);
+  int Right = randInt(0, Len - 1);
+  if (Left > Right) {
+    std::swap(Left, Right);
+  }
+  for (int I = 0; I < Len; I++) {
+    if (I >= Recipe2.size()) {
+      Offspring.push_back(Recipe1[I]);
+    } else if (Left <= I && I <= Right) {
+      Offspring.push_back(Recipe2[I]);
+    } else {
+      Offspring.push_back(Recipe1[I]);
+    }
+  }
+  return Offspring;
+}
+
+std::string PhaseOrderGeneratorBase::mutateLength(std::string Recipe) {
+  std::vector<int> NewChance = {0, 100, 95, 90, 85, 0};
+  std::vector<int> LessChance = {0, 0, 5, 10, 15, 20};
+  if (chanceOutcome(NewChance[Recipe.size()])) {
+    Recipe.push_back('A' + randInt(0, 4));
+  }
+  if (chanceOutcome(LessChance[Recipe.size()])) {
+    Recipe.pop_back();
+  }
+  return Recipe;
+}
+
+std::string PhaseOrderGeneratorBase::mutateSwap(std::string Recipe,
+                                                int MutateChance) {
+  if (!chanceOutcome(MutateChance)) {
+    return Recipe;
+  }
+  Recipe = mutateLength(Recipe);
+  int Left = randInt(0, Recipe.size() - 1);
+  int Right = 0;
+  do {
+    Right = randInt(0, Recipe.size() - 1);
+  } while (Left != Right);
+  std::swap(Recipe[Left], Recipe[Right]);
+  return Recipe;
+}
+
+std::string PhaseOrderGeneratorBase::mutateFlip(std::string Recipe,
+                                                int MutateChance) {
+  if (!chanceOutcome(MutateChance)) {
+    return Recipe;
+  }
+
+  Recipe = mutateLength(Recipe);
+
+  int Idx = randInt(0, Recipe.size() - 1);
+  char Last = Recipe[Idx];
+  do {
+    Recipe[Idx] = 'A' + randInt(0, 4);
+  } while (Recipe[Idx] == Last);
+
+  return Recipe;
+}
+
+PhaseOrderGeneratorBase::Recipes PhaseOrderGeneratorBase::generateRecipeGenetic(
+    std::vector<std::string> &AllRecipes, std::string Recipe, int Iteration,
+    double Temperature) {
+  if (Iteration <= InitialSampleSize) {
+    return generateRecipe(AllRecipes, Iteration);
+  }
+  std::string GoodRecipe = getRandomBestRecipe();
+  std::string CrossedOver = Recipe;
+
+  int MutateChance = MutationRate * 100;
+  if (chanceOutcome(CrossoverRate * 100)) {
+    if (CrossoverType == CrossoverFunction::Uniform) {
+      CrossedOver = crossoverUniform(Recipe, GoodRecipe);
+    } else if (CrossoverType == CrossoverFunction::SinglePoint) {
+      CrossedOver = crossoverOnePoint(Recipe, GoodRecipe);
+    } else {
+      CrossedOver = crossoverTwoPoint(Recipe, GoodRecipe);
+    }
+  }
+  if (CrossedOver == Recipe) {
+    MutateChance = 100;
+  }
+  std::string FinalRecipe = CrossedOver;
+  if (MutationType == MutationFunction::FlipOne) {
+    FinalRecipe = mutateFlip(CrossedOver, MutateChance);
+  } else {
+    FinalRecipe = mutateSwap(CrossedOver, MutateChance);
+  }
+  std::vector<int> Rs;
+  for (auto I : FinalRecipe) {
+    Rs.push_back(I - 'A');
+  }
+  return convert(Rs);
+}
+
 PhaseOrderGeneratorBase::Recipes
 PhaseOrderGeneratorBase::generateRecipe(std::vector<std::string> &AllRecipes,
                                         int Iteration) {
-  // For now just generate a random sequence.
   int Sz = AllRecipes.size();
   Iteration = std::min(Sz - 1, Iteration);
   std::string Recipe = AllRecipes[Iteration];
-  std::vector<int> rs;
-  for (auto i : Recipe) {
-    rs.push_back(std::stoi(std::string(1, i)));
+  std::vector<int> Rs;
+  for (auto I : Recipe) {
+    Rs.push_back(std::stoi(std::string(1, I)));
   }
-  return convert(rs);
+  return convert(Rs);
 }
