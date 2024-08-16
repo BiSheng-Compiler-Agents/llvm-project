@@ -60,6 +60,8 @@ public:
   // Return the index of a feature within the feature list used by inference().
   int getIndex(uint64_t FeatureID) const;
   int getIndex(std::string FeatureName) const;
+  int getIndexOrNone(uint64_t FeatureID) const;      // returns -1 if not found
+  int getIndexOrNone(std::string FeatureName) const; // returns "" if not found
 
   // Return the name of a feature within the feature list used by inference().
   std::string getName(uint64_t FeatureID) const;

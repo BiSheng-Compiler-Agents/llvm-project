@@ -113,6 +113,23 @@ int Model::getIndex(std::string FeatureName) const {
   return getIndex(ID);
 }
 
+int Model::getIndexOrNone(uint64_t FeatureID) const {
+  auto Find = IDToIndex.find(FeatureID);
+  if (Find == IDToIndex.end()) {
+    return -1;
+  }
+  return Find->second;
+}
+
+int Model::getIndexOrNone(std::string FeatureName) const {
+  auto Find = NameToID.find(FeatureName);
+  if (Find == NameToID.end()) {
+    return -1;
+  }
+  uint64_t ID = Find->second;
+  return getIndex(ID);
+}
+
 std::string Model::getName(uint64_t FeatureID) const {
   auto Find = IDToName.find(FeatureID);
   assert(Find != IDToName.end());
@@ -133,6 +150,30 @@ std::string Model::getOutputType(std::string OutputName) const {
   auto Find = OutputMap.find(OutputName);
   assert(Find != OutputMap.end());
   return Find->second;
+}
+
+std::vector<std::pair<std::string, std::string>>
+filterFeatures(std::vector<std::pair<std::string, std::string>> FeatureValues,
+               std::shared_ptr<Model> ModelPtr) {
+  std::vector<std::pair<std::string, std::string>> FilteredFeatures;
+  for (const auto &Feature : FeatureValues) {
+    if (ModelPtr->getIndexOrNone(Feature.first) != -1) {
+      FilteredFeatures.push_back(Feature);
+    }
+  }
+  return FilteredFeatures;
+}
+
+std::vector<std::pair<uint64_t, std::string>>
+filterFeatures(std::vector<std::pair<uint64_t, std::string>> FeatureValues,
+               std::shared_ptr<Model> ModelPtr) {
+  std::vector<std::pair<uint64_t, std::string>> FilteredFeatures;
+  for (const auto &Feature : FeatureValues) {
+    if (ModelPtr->getIndexOrNone(Feature.first) != -1) {
+      FilteredFeatures.push_back(Feature);
+    }
+  }
+  return FilteredFeatures;
 }
 
 ACPOMLPythonInterface::ACPOMLPythonInterface() : NextID{0} {
@@ -494,13 +535,14 @@ bool ACPOMLPythonInterface::initializeFeatures(
                       << " has not been loaded\n");
     return false;
   }
-  if (FeatureValues.size() > Find->second->getNumFeatures()) {
+  auto FilteredFeatures = filterFeatures(FeatureValues, Find->second);
+  if (FilteredFeatures.size() != Find->second->getNumFeatures()) {
     LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid features\n");
     return false;
   }
   CurrentlyActiveModel = ModelName;
   std::string Command = "InitializeFeatures " + ModelName;
-  for (const auto &Feature : FeatureValues) {
+  for (const auto &Feature : FilteredFeatures) {
     uint64_t FeatureID = Feature.first;
     std::string FeatureValue = Feature.second;
     int Index = Find->second->getIndex(FeatureID);
@@ -520,13 +562,14 @@ bool ACPOMLPythonInterface::initializeFeatures(
                       << " has not been loaded\n");
     return false;
   }
-  if (FeatureValues.size() > Find->second->getNumFeatures()) {
+  auto FilteredFeatures = filterFeatures(FeatureValues, Find->second);
+  if (FilteredFeatures.size() != Find->second->getNumFeatures()) {
     LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid features\n");
     return false;
   }
   CurrentlyActiveModel = ModelName;
   std::string Command = "InitializeFeatures " + ModelName;
-  for (const auto &Feature : FeatureValues) {
+  for (const auto &Feature : FilteredFeatures) {
     std::string FeatureName = Feature.first;
     std::string FeatureValue = Feature.second;
     int Index = Find->second->getIndex(FeatureName);
@@ -1067,12 +1110,13 @@ bool ACPOMLCPPInterface::initializeFeatures(
                       << " has not been loaded\n");
     return false;
   }
-  if (FeatureValues.size() > Find->second->getNumFeatures()) {
+  auto FilteredFeatures = filterFeatures(FeatureValues, Find->second);
+  if (FilteredFeatures.size() != Find->second->getNumFeatures()) {
     LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid features\n");
     return false;
   }
   CurrentlyActiveModel = ModelName;
-  for (const auto &Feature : FeatureValues) {
+  for (const auto &Feature : FilteredFeatures) {
     uint64_t FeatureID = Feature.first;
     std::string FeatureValue = Feature.second;
 
@@ -1113,12 +1157,13 @@ bool ACPOMLCPPInterface::initializeFeatures(
                       << " has not been loaded\n");
     return false;
   }
-  if (FeatureValues.size() > Find->second->getNumFeatures()) {
+  auto FilteredFeatures = filterFeatures(FeatureValues, Find->second);
+  if (FilteredFeatures.size() != Find->second->getNumFeatures()) {
     LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid features\n");
     return false;
   }
   CurrentlyActiveModel = ModelName;
-  for (const auto &Feature : FeatureValues) {
+  for (const auto &Feature : FilteredFeatures) {
     std::string FeatureName = Feature.first;
     std::string FeatureValue = Feature.second;
 
