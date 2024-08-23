@@ -1001,6 +1001,9 @@ endif()
 #
 set(TENSORFLOW_AOT_PATH "" CACHE PATH "Path to TensorFlow pip install dir")
 
+set(LLVM_INLINER_MODEL_PATH "" CACHE PATH "Path to the inliner model")
+set(ACPO_AOT OFF CACHE BOOL "Whether or not ACPO AOT is enabled")
+
 if (NOT TENSORFLOW_AOT_PATH STREQUAL "")
   set(LLVM_HAVE_TF_AOT "ON" CACHE BOOL "Tensorflow AOT available")
   set(TENSORFLOW_AOT_COMPILER
@@ -1009,6 +1012,7 @@ if (NOT TENSORFLOW_AOT_PATH STREQUAL "")
   include_directories(${TENSORFLOW_AOT_PATH}/include)
   add_subdirectory(${TENSORFLOW_AOT_PATH}/xla_aot_runtime_src
     ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/tf_runtime)
+  target_compile_definitions(tf_xla_runtime_objects PUBLIC EIGEN_NEON_GEBP_NR=4) # Fix for issue https://github.com/tensorflow/tensorflow/issues/58481
   install(TARGETS tf_xla_runtime EXPORT LLVMExports
     ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX} COMPONENT tf_xla_runtime)
   set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS tf_xla_runtime)

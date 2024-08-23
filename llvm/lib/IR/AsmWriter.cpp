@@ -86,7 +86,15 @@
 #include <utility>
 #include <vector>
 
+#include "llvm/ADT/StringSet.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Support/CommandLine.h"
+
 using namespace llvm;
+
+cl::opt<std::string> UnnamedVariablePrefix(
+    "unnamed-var-prefix", cl::Hidden,
+    cl::desc("Specify the prefix added to unnamed variables"), cl::init(""));
 
 // Make virtual table appear in this compilation unit.
 AssemblyAnnotationWriter::~AssemblyAnnotationWriter() = default;
@@ -2484,9 +2492,11 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Value *V,
     Slot = -1;
   }
 
-  if (Slot != -1)
-    Out << Prefix << Slot;
-  else
+  if (Slot != -1) {
+    // By default, UnnamedVariablePrefix is empty so it matches original behaviour
+    // unless specified.
+    Out << Prefix << UnnamedVariablePrefix << Slot;
+  } else
     Out << "<badref>";
 }
 
@@ -2599,12 +2609,13 @@ public:
   void writeAllAttributeGroups();
 
   void printTypeIdentities();
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   void printGlobal(const GlobalVariable *GV, bool PrintDeclarationOnly = false);
   void printAlias(const GlobalAlias *GA);
   void printIFunc(const GlobalIFunc *GI);
   void printComdat(const Comdat *C);
-  void printRequisiteDeclarations(const Function *F);
+  void printRequisiteDeclarations(const Function *F,
+                                  std::vector<BasicBlock *> LoopBlocks = {});  
   void printFunction(const Function *F, bool PrintCompleteIR = false,
                      bool PrintDeclarationOnly = false);
 #else
@@ -2614,8 +2625,14 @@ public:
   void printComdat(const Comdat *C);
   void printFunction(const Function *F);
 #endif
+#if defined(ENABLE_ACPO)
+  void printLoopWithFunctionWrapper(Function *F,
+                                    std::vector<BasicBlock *> LoopBlocks,
+                                    BasicBlock *Header,
+                                    SmallVector<BasicBlock *, 8> ExitBlocks);
+#endif
   void printArgument(const Argument *FA, AttributeSet Attrs);
-  void printBasicBlock(const BasicBlock *BB);
+  void printBasicBlock(const BasicBlock *BB, bool PrintLabelOnly = false);
   void printInstructionLine(const Instruction &I);
   void printInstruction(const Instruction &I);
 
@@ -3600,7 +3617,7 @@ static void maybePrintComdat(formatted_raw_ostream &Out,
   Out << ')';
 }
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
 void AssemblyWriter::printGlobal(const GlobalVariable *GV,
                                  bool PrintDeclarationOnly) {
   if (GV->isMaterializable() && !PrintDeclarationOnly)
@@ -3614,7 +3631,7 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   WriteAsOperandInternal(Out, GV, WriterCtx);
   Out << " = ";
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   if ((!GV->hasInitializer() || PrintDeclarationOnly) &&
       GV->hasExternalLinkage())
 #else
@@ -3637,7 +3654,7 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   Out << (GV->isConstant() ? "constant " : "global ");
   TypePrinter.print(GV->getValueType(), Out);
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   if (GV->hasInitializer() && !PrintDeclarationOnly) {
 #else
   if (GV->hasInitializer()) {
@@ -3791,21 +3808,34 @@ void AssemblyWriter::printTypeIdentities() {
   }
 }
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
 /// printRequisiteDeclarations - Print the declarations of type identities,
 /// global variables, functions, and function attribute groups of a function.
-void AssemblyWriter::printRequisiteDeclarations(const Function *F) {
+void AssemblyWriter::printRequisiteDeclarations(
+    const Function *F, std::vector<BasicBlock *> LoopBlocks) {
   // walk through instructions and collect global variables & functions
   SmallPtrSet<GlobalVariable *, 8> GVs;
   SmallPtrSet<Function *, 8> Functions;
-  for (const BasicBlock &BB : *F) {
-    for (const Instruction &I : BB) {
+  std::vector<BasicBlock *> BasicBlocks;
+  if (!LoopBlocks.empty()) {
+    for (BasicBlock *BB : LoopBlocks)
+      BasicBlocks.push_back(BB);
+  } else {
+    for (const BasicBlock &BB : *F)
+      BasicBlocks.push_back(const_cast<BasicBlock *>(&BB));
+  }
+
+  for (const BasicBlock *BB : BasicBlocks) {
+    for (const Instruction &I : *BB) {
       // Check for function
       if (const auto *CI = dyn_cast<CallInst>(&I)) {
         Function *func = CI->getCalledFunction();
         if (func)
           Functions.insert(func);
       }
+      if (const InvokeInst *II = dyn_cast<InvokeInst>(&I))
+        if (Function *func = dyn_cast<Function>(II->getCalledOperand()))
+          Functions.insert(func);
       // Check for global variables
       for (const Use &U : I.operands()) {
         if (GlobalVariable *gv = dyn_cast<GlobalVariable>(U))
@@ -3820,6 +3850,16 @@ void AssemblyWriter::printRequisiteDeclarations(const Function *F) {
               GVs.insert(gv);
           }
         }
+        // Check for ConstantExpr BitCast
+        if (const auto *CstExpr = dyn_cast<ConstantExpr>(U))
+          if (CstExpr->isCast())
+            for (const Use &UU : CstExpr->operands()) {
+              if (GlobalVariable *gv = dyn_cast<GlobalVariable>(UU))
+                GVs.insert(gv);
+              else if (const Function *func =
+                           dyn_cast<Function>(CstExpr->stripPointerCasts()))
+                Functions.insert(const_cast<Function *>(func));
+            }
       }
     }
   }
@@ -3839,7 +3879,7 @@ void AssemblyWriter::printRequisiteDeclarations(const Function *F) {
       // modify property if needed
       if (!(*GVit)->hasAvailableExternallyLinkage() &&
           !((*GVit)->getName() == "llvm.global_ctors") &&
-          (*GVit)->hasLocalLinkage()) {
+          ((*GVit)->hasLocalLinkage() || (*GVit)->hasCommonLinkage())) {
         (*GVit)->setLinkage(GlobalValue::ExternalLinkage);
         (*GVit)->setVisibility(GlobalValue::HiddenVisibility);
       }
@@ -3857,8 +3897,14 @@ void AssemblyWriter::printRequisiteDeclarations(const Function *F) {
   // print functions
   for (auto FuncIt = Functions.begin(), et = Functions.end(); FuncIt != et;
        ++FuncIt) {
+    if (!LoopBlocks.empty() && *FuncIt == F)
+      continue;
     Out << '\n';
+    GlobalValue::LinkageTypes SavedLinkage = (*FuncIt)->getLinkage();
+    // Function declarations can only have external or extern_weak linkage
+    (*FuncIt)->setLinkage(GlobalValue::ExternalLinkage);
     printFunction(*FuncIt, false, true);
+    (*FuncIt)->setLinkage(SavedLinkage);
   }
 
   // Write attribute groups.
@@ -3870,7 +3916,8 @@ void AssemblyWriter::printRequisiteDeclarations(const Function *F) {
 }
 
 /// printFunction - Print all aspects of a function.
-void AssemblyWriter::printFunction(const Function *F, bool PrintCompleteIR,
+void AssemblyWriter::printFunction(const Function *F,
+                                   bool PrintCompleteIR,
                                    bool PrintDeclarationOnly) {
   if (PrintCompleteIR && !PrintDeclarationOnly) {
     printRequisiteDeclarations(F);
@@ -3883,6 +3930,9 @@ void AssemblyWriter::printFunction(const Function *F, bool PrintCompleteIR,
 #else
 void AssemblyWriter::printFunction(const Function *F) {
   if (AnnotationWriter) AnnotationWriter->emitFunctionAnnot(F, Out);
+
+  if (AnnotationWriter)
+    AnnotationWriter->emitFunctionAnnot(F, Out);
 
   if (F->isMaterializable())
     Out << "; Materializable\n";
@@ -3904,7 +3954,7 @@ void AssemblyWriter::printFunction(const Function *F) {
       Out << "; Function Attrs: " << AttrStr << '\n';
   }
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   if (!PrintDeclarationOnly)
     Machine.incorporateFunction(F);
 
@@ -3949,7 +3999,7 @@ void AssemblyWriter::printFunction(const Function *F) {
   Out << '(';
 
   // Loop over the arguments, printing them...
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   if ((F->isDeclaration() && !IsForDebug) || PrintDeclarationOnly) {
 #else
   if (F->isDeclaration() && !IsForDebug) {
@@ -4024,7 +4074,7 @@ void AssemblyWriter::printFunction(const Function *F) {
     writeOperand(F->getPersonalityFn(), /*PrintType=*/true);
   }
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   if (F->isDeclaration() || PrintDeclarationOnly) {
 #else
   if (F->isDeclaration()) {
@@ -4046,15 +4096,101 @@ void AssemblyWriter::printFunction(const Function *F) {
     Out << "}\n";
   }
 
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
   // Output metadata
   if (!Machine.mdn_empty() && PrintCompleteIR && !PrintDeclarationOnly) {
     Out << '\n';
     writeAllMDNodes();
   }
-#endif
+  if (!PrintDeclarationOnly)
+    Machine.purgeFunction();
+#else
   Machine.purgeFunction();
+#endif
 }
+
+#if defined(ENABLE_ACPO)
+/// printLoopWithFunctionWrapper - print out a loop wrapped in a dummy
+/// function. All global/local variables, functions and metadata that
+/// are referenced inside the loop are printed out. Loop predecessors
+/// and loop exit blocks are also included.
+void AssemblyWriter::printLoopWithFunctionWrapper(
+    Function *F, std::vector<BasicBlock *> LoopBlocks, BasicBlock *Header,
+    SmallVector<BasicBlock *, 8> ExitBlocks) {
+  printRequisiteDeclarations(F, LoopBlocks);
+
+  // Output the dummy function
+  bool IsFirstArgument = true;
+  Out << "define void ";
+  std::string FunctionName = "foo";
+  PrintLLVMName(Out, FunctionName, GlobalPrefix);
+  Out << '(';
+  for (const Argument &Arg : F->args()) {
+    if (IsFirstArgument) // Add commas if there are more than one
+      IsFirstArgument = false;
+    else
+      Out << ", ";
+      Out << &Arg;
+  }
+
+  // All local variables referenced in this loop but are not declared here
+  // are printed next in the argument list
+  SmallPtrSet<const Instruction *, 32> AddedVariables;
+  for (const BasicBlock *BB : LoopBlocks)
+    for (const Instruction &I : *BB)
+      for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
+        Value *Op = I.getOperand(i);
+        // Print out the operand in the function argument list
+        // if it is an instruction that is not contained in this loop
+        if (const Instruction *II = dyn_cast_or_null<Instruction>(Op))
+          if (!AddedVariables.contains(II) &&
+              std::find(LoopBlocks.begin(), LoopBlocks.end(),
+                        II->getParent()) != LoopBlocks.end()) {
+            AddedVariables.insert(II);
+            if (IsFirstArgument)
+              IsFirstArgument = false;
+            else
+              Out << ", ";
+
+            writeOperand(Op, true);
+          }
+      }
+
+  Out << ") {\n";
+
+  // Output loop predecessors
+  // Each predecessor only needs to have an unconditional 'br' instruction
+  // that branches to the loop header
+  for (const BasicBlock *Pred : children<Inverse<BasicBlock *>>(Header))
+    // If the block is not in the loop
+    if (std::find(LoopBlocks.begin(), LoopBlocks.end(), Pred) !=
+        LoopBlocks.end()) {
+      printBasicBlock(Pred, true);
+      Out << "  br label %";
+      PrintLLVMName(Out, Header->getName(), LabelPrefix);
+      Out << "\n";
+    }
+
+  // Output all of the loop's basic blocks
+  for (const BasicBlock *BB : LoopBlocks)
+    printBasicBlock(BB);
+
+  // Output loop exit blocks
+  // Each exit block only needs a 'ret' instruction
+  for (const BasicBlock *Succ : ExitBlocks) {
+    printBasicBlock(Succ, true);
+    Out << "  ret void\n";
+  }
+
+  Out << "}\n";
+
+  // Output metadata
+  if (!Machine.mdn_empty()) {
+    Out << '\n';
+    writeAllMDNodes();
+  }
+}
+#endif
 
 /// printArgument - This member is called for every argument that is passed into
 /// the function.  Simply print it out
@@ -4075,13 +4211,17 @@ void AssemblyWriter::printArgument(const Argument *Arg, AttributeSet Attrs) {
   } else {
     int Slot = Machine.getLocalSlot(Arg);
     assert(Slot != -1 && "expect argument in function here");
-    Out << " %" << Slot;
+    // By default, UnnamedVariablePrefix is empty so it matches original behaviour
+    // unless specified.
+    Out << " %" << UnnamedVariablePrefix << Slot;
   }
 }
 
 /// printBasicBlock - This member is called for each basic block in a method.
-void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
-  bool IsEntryBlock = BB->getParent() && BB->isEntryBlock();
+void AssemblyWriter::printBasicBlock(const BasicBlock *BB,
+                                     bool PrintLabelOnly) {
+  assert(BB && BB->getParent() && "block without parent!");
+  bool IsEntryBlock = BB == &BB->getParent()->getEntryBlock();
   if (BB->hasName()) {              // Print out the label if it exists...
     Out << "\n";
     PrintLLVMName(Out, BB->getName(), LabelPrefix);
@@ -4089,10 +4229,17 @@ void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
   } else if (!IsEntryBlock) {
     Out << "\n";
     int Slot = Machine.getLocalSlot(BB);
-    if (Slot != -1)
-      Out << Slot << ":";
-    else
+    if (Slot != -1) {
+      // By default, UnnamedVariablePrefix is empty so it matches original behaviour
+      // unless specified.
+      Out << UnnamedVariablePrefix << Slot << ":";
+    } else
       Out << "<badref>:";
+  }
+
+  if (PrintLabelOnly) {
+    Out << "\n";
+    return;
   }
 
   if (!IsEntryBlock) {
@@ -4188,8 +4335,11 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     int SlotNum = Machine.getLocalSlot(&I);
     if (SlotNum == -1)
       Out << "<badref> = ";
-    else
-      Out << '%' << SlotNum << " = ";
+    else {
+      // By default, UnnamedVariablePrefix is empty so it matches original behaviour
+      // unless specified.
+      Out << '%' << UnnamedVariablePrefix << SlotNum << " = ";
+    }
   }
 
   if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
@@ -4758,6 +4908,20 @@ void BasicBlock::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
                    ShouldPreserveUseListOrder);
   W.printBasicBlock(this);
 }
+
+#if defined(ENABLE_ACPO)
+void Loop::printWithFunctionWrapper(
+    raw_ostream &ROS, Function *F, ArrayRef<BasicBlock *> LoopBlocks,
+    BasicBlock *Header, SmallVector<BasicBlock *, 8> ExitBlocks,
+    AssemblyAnnotationWriter *AAW, bool ShouldPreserveUseListOrder,
+    bool IsForDebug) const {
+  SlotTracker SlotTable(F);
+  formatted_raw_ostream OS(ROS);
+  AssemblyWriter W(OS, SlotTable, F->getParent(), AAW, IsForDebug,
+                   ShouldPreserveUseListOrder);
+  W.printLoopWithFunctionWrapper(F, LoopBlocks, Header, ExitBlocks);
+}
+#endif
 
 void Module::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
                    bool ShouldPreserveUseListOrder, bool IsForDebug) const {

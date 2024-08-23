@@ -33,6 +33,10 @@ MODULE_ANALYSIS("ir-similarity", IRSimilarityAnalysis())
 MODULE_ANALYSIS("autotuning-dump", AutotuningDumpAnalysis())
 #endif
 
+#if defined(ENABLE_ACPO)
+MODULE_ANALYSIS("call-height", CallHeightAnalysis())
+#endif
+
 #ifndef MODULE_ALIAS_ANALYSIS
 #define MODULE_ALIAS_ANALYSIS(NAME, CREATE_PASS)                               \
   MODULE_ANALYSIS(NAME, CREATE_PASS)
@@ -215,6 +219,9 @@ CGSCC_PASS("invalidate<all>", InvalidateAllAnalysesPass())
 CGSCC_PASS("attributor-cgscc", AttributorCGSCCPass())
 CGSCC_PASS("openmp-opt-cgscc", OpenMPOptCGSCCPass())
 CGSCC_PASS("no-op-cgscc", NoOpCGSCCPass())
+#if defined(ENABLE_ACPO)
+CGSCC_PASS("dump-feature", DumpFeaturePass())
+#endif
 #undef CGSCC_PASS
 
 #ifndef CGSCC_PASS_WITH_PARAMS
@@ -325,6 +332,9 @@ FUNCTION_PASS("view-dom", DomViewer())
 FUNCTION_PASS("view-dom-only", DomOnlyViewer())
 FUNCTION_PASS("view-post-dom", PostDomViewer())
 FUNCTION_PASS("view-post-dom-only", PostDomOnlyViewer())
+#if defined(ENABLE_ACPO)
+FUNCTION_PASS("dump-callsite", DumpCallsitePass())
+#endif
 FUNCTION_PASS("fix-irreducible", FixIrreduciblePass())
 FUNCTION_PASS("flattencfg", FlattenCFGPass())
 FUNCTION_PASS("make-guards-explicit", MakeGuardsExplicitPass())

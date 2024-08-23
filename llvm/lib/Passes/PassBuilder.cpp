@@ -267,6 +267,12 @@
 #include "llvm/Transforms/Scalar/AutoTuningCompile.h"
 #endif
 
+#if defined(ENABLE_ACPO)
+#include "llvm/Analysis/CallHeight.h"
+#include "llvm/Analysis/DumpCallsite.h"
+#include "llvm/Analysis/DumpFeature.h"
+#endif
+
 using namespace llvm;
 
 static const Regex DefaultAliasRegex(

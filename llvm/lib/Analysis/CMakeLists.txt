@@ -4,6 +4,30 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
 
   set(LLVM_INLINER_MODEL_CURRENT_URL "<UNSPECIFIED>" CACHE STRING "URL to download the LLVM inliner model")
 
+  if (ACPO_AOT)
+    foreach (model_name model_path model_signature IN ZIP_LISTS LLVM_ACPO_MODEL_NAMES LLVM_ACPO_MODEL_PATHS LLVM_ACPO_MODEL_SIGNATURES)
+      set(fname ${model_name}CompiledModel)
+      string(TOUPPER ${fname} fname_allcaps)
+      if (LLVM_ACPO_OVERRIDE)
+        string(TOUPPER ${LLVM_ACPO_OVERRIDE_ARCH} arch_allcaps)
+        set(LLVM_OVERRIDE_MODEL_HEADER_${fname_allcaps}
+          ${LLVM_ACPO_OVERRIDE_PATH}/${fname}-${arch_allcaps}.h)
+        set(LLVM_OVERRIDE_MODEL_OBJECT_${fname_allcaps}
+          ${LLVM_ACPO_OVERRIDE_PATH}/${fname}-${arch_allcaps}.o)
+      endif()
+
+      tf_find_and_compile(
+        ${model_path}
+        ${LLVM_INLINER_MODEL_CURRENT_URL}
+        ${LLVM_INLINER_MODEL_PATH_DEFAULT}
+        ""
+        serve
+        "${model_signature}"
+        "${fname}"
+        "llvm::${fname}"
+      )
+    endforeach()
+  endif()
   if (DEFINED LLVM_HAVE_TF_AOT)
     tf_find_and_compile(
       ${LLVM_INLINER_MODEL_PATH}
@@ -24,6 +48,10 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
 endif()
 
 add_llvm_component_library(LLVMAnalysis
+  ACPOCollectFeatures.cpp
+  ACPOFIModel.cpp
+  ACPOMLInterface.cpp
+  ACPOModel.cpp
   AliasAnalysis.cpp
   AliasAnalysisEvaluator.cpp
   AliasSetTracker.cpp
@@ -41,6 +69,7 @@ add_llvm_component_library(LLVMAnalysis
   CGSCCPassManager.cpp
   CallGraph.cpp
   CallGraphSCCPass.cpp
+  CallHeight.cpp
   CallPrinter.cpp
   CaptureTracking.cpp
   CmpInstAnalysis.cpp
@@ -59,6 +88,8 @@ add_llvm_component_library(LLVMAnalysis
   DomPrinter.cpp
   DomTreeUpdater.cpp
   DominanceFrontier.cpp
+  DumpCallsite.cpp
+  DumpFeature.cpp
   FunctionPropertiesAnalysis.cpp
   GlobalsModRef.cpp
   GuardUtils.cpp
@@ -100,6 +131,7 @@ add_llvm_component_library(LLVMAnalysis
   MemoryProfileInfo.cpp
   MemorySSA.cpp
   MemorySSAUpdater.cpp
+  ModelDataCollector.cpp
   ModelUnderTrainingRunner.cpp
   ModuleDebugInfoPrinter.cpp
   ModuleSummaryAnalysis.cpp

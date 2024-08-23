@@ -386,6 +386,17 @@ public:
   void dump() const;
   void dumpVerbose() const;
 
+#if defined(ENABLE_ACPO)
+  /// Print loop IR wrapped in a dummy function
+  void printWithFunctionWrapper(raw_ostream &ROS, Function *F,
+                                ArrayRef<BasicBlock *> LoopBlocks,
+                                BasicBlock *Header,
+                                SmallVector<BasicBlock *, 8> ExitBlocks,
+                                AssemblyAnnotationWriter *AAW,
+                                bool ShouldPreserveUseListOrder,
+                                bool IsForDebug) const;
+#endif
+
   /// Return the debug location of the start of this loop.
   /// This looks for a BB terminating instruction with a known debug
   /// location by looking at the preheader and header blocks. If it

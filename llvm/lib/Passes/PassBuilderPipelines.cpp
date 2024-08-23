@@ -138,6 +138,12 @@
 #include "llvm/Transforms/Scalar/AutoTuningCompile.h"
 #endif
 
+#if defined(ENABLE_ACPO)
+#include "llvm/Analysis/CallHeight.h"
+#include "llvm/Analysis/DumpCallsite.h"
+#include "llvm/Analysis/DumpFeature.h"
+#endif
+
 using namespace llvm;
 
 static cl::opt<InliningAdvisorMode> UseInlineAdvisor(
@@ -893,6 +899,14 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
   // manager and trying to emulate its precise behavior. Much of this doesn't
   // make a lot of sense and we should revisit the core CGSCC structure.
   CGSCCPassManager &MainCGPipeline = MIWP.getPM();
+
+#if defined(ENABLE_ACPO)
+  if (EnableFeatureDump) {
+    // Add CallHeight analysis for dump feature
+    MIWP.addModulePass(RequireAnalysisPass<CallHeightAnalysis, Module>());
+    MainCGPipeline.addPass(DumpFeaturePass());
+  }
+#endif
 
   // Note: historically, the PruneEH pass was run first to deduce nounwind and
   // generally clean up exception handling overhead. It isn't clear this is
