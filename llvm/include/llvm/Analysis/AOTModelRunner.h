@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_AOTMODEL_H
 #define LLVM_ANALYSIS_AOTMODEL_H
 
@@ -201,3 +202,4 @@ private:
 } // namespace llvm
 
 #endif // LLVM_ANALYSIS_AOTMODEL_H
+#endif // ENABLE_ACPO

@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_ACPOMODEL_H
 #define LLVM_ANALYSIS_ACPOMODEL_H
 
@@ -37,3 +38,4 @@ protected:
 } // namespace llvm
 
 #endif // LLVM_ANALYSIS_ACPOMODEL_H
+#endif // ENABLE_ACPO

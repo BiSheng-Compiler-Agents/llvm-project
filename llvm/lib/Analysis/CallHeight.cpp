@@ -9,6 +9,8 @@
 // This file implements getting the call height of functions in a module.
 //
 //===----------------------------------------------------------------------===//
+
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/CallHeight.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/CallGraph.h"
@@ -87,3 +89,4 @@ INITIALIZE_PASS(CallHeightAnalysisWrapper, DEBUG_TYPE, "Call Height Analysis",
 Pass *llvm::createCallHeightAnalysisWrapper() {
   return new CallHeightAnalysisWrapper();
 }
+#endif

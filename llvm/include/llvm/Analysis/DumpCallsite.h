@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_DUMPCALLSITE
 #define LLVM_ANALYSIS_DUMPCALLSITE
 
@@ -25,3 +26,4 @@ public:
 } // namespace llvm
 
 #endif
+#endif // ENABLE_ACPO

@@ -41,8 +41,11 @@ public:
   }
   void onSuccessfulInlining(const MLInlineAdvice &Advice,
                             bool CalleeWasDeleted);
-
+#if defined(ENABLE_ACPO)
+  bool isForcedToStop() const override { return ForceStop; }
+#else
   bool isForcedToStop() const { return ForceStop; }
+#endif
   int64_t getLocalCalls(Function &F);
   const MLModelRunner &getModelRunner() const { return *ModelRunner.get(); }
   FunctionPropertiesInfo &getCachedFPI(Function &) const;

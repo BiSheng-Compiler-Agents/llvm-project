@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/ACPOModel.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
@@ -61,3 +62,4 @@ void ACPOModel::addFeature(int64_t ID, Constant *Val) {
   assert(CustomFeatureMap.find(ID) == CustomFeatureMap.end());
   CustomFeatureMap[ID] = Val;
 }
+#endif

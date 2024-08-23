@@ -72,6 +72,36 @@ enum class InlineCostFeatureIndex : size_t {
 
   NumberOfFeatures
 };
+
+#if defined(ENABLE_ACPO)
+const std::map<InlineCostFeatureIndex, std::string> InlineCostFeatureIndexToName = {
+  { InlineCostFeatureIndex::sroa_savings, "sroa_savings" },
+  { InlineCostFeatureIndex::sroa_losses, "sroa_losses" },
+  { InlineCostFeatureIndex::load_elimination, "load_elimination" },
+  { InlineCostFeatureIndex::call_penalty, "call_penalty" },
+  { InlineCostFeatureIndex::call_argument_setup, "call_argument_setup" },
+  { InlineCostFeatureIndex::load_relative_intrinsic, "load_relative_intrinsic" },
+  { InlineCostFeatureIndex::lowered_call_arg_setup, "lowered_call_arg_setup" },
+  { InlineCostFeatureIndex::indirect_call_penalty, "indirect_call_penalty" },
+  { InlineCostFeatureIndex::jump_table_penalty, "jump_table_penalty" },
+  { InlineCostFeatureIndex::case_cluster_penalty, "case_cluster_penalty" },
+  { InlineCostFeatureIndex::switch_penalty, "switch_penalty" },
+  { InlineCostFeatureIndex::unsimplified_common_instructions, "unsimplified_common_instructions" },
+  { InlineCostFeatureIndex::num_loops, "num_loops" },
+  { InlineCostFeatureIndex::dead_blocks, "dead_blocks" },
+  { InlineCostFeatureIndex::simplified_instructions, "simplified_instructions" },
+  { InlineCostFeatureIndex::constant_args, "constant_args" },
+  { InlineCostFeatureIndex::constant_offset_ptr_args, "constant_offset_ptr_args" },
+  { InlineCostFeatureIndex::callsite_cost, "callsite_cost" },
+  { InlineCostFeatureIndex::cold_cc_penalty, "cold_cc_penalty" },
+  { InlineCostFeatureIndex::last_call_to_static_bonus, "last_call_to_static_bonus" },
+  { InlineCostFeatureIndex::is_multiple_blocks, "is_multiple_blocks" },
+  { InlineCostFeatureIndex::nested_inlines, "nested_inlines" },
+  { InlineCostFeatureIndex::nested_inline_cost_estimate, "nested_inline_cost_estimate" },
+  { InlineCostFeatureIndex::threshold, "threshold" }
+};
+#endif
+
 // clang-format on
 
 using InlineCostFeatures =

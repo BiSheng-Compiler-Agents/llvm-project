@@ -86,15 +86,19 @@
 #include <utility>
 #include <vector>
 
+#if defined(ENABLE_ACPO)
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/CommandLine.h"
+#endif
 
 using namespace llvm;
 
+#if defined(ENABLE_ACPO)
 cl::opt<std::string> UnnamedVariablePrefix(
     "unnamed-var-prefix", cl::Hidden,
     cl::desc("Specify the prefix added to unnamed variables"), cl::init(""));
+#endif
 
 // Make virtual table appear in this compilation unit.
 AssemblyAnnotationWriter::~AssemblyAnnotationWriter() = default;
@@ -2491,12 +2495,17 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Value *V,
   } else {
     Slot = -1;
   }
-
+#if defined(ENABLE_ACPO)
   if (Slot != -1) {
     // By default, UnnamedVariablePrefix is empty so it matches original behaviour
     // unless specified.
     Out << Prefix << UnnamedVariablePrefix << Slot;
   } else
+#else
+  if (Slot != -1)
+    Out << Prefix << Slot;
+  else
+#endif
     Out << "<badref>";
 }
 
@@ -2632,7 +2641,11 @@ public:
                                     SmallVector<BasicBlock *, 8> ExitBlocks);
 #endif
   void printArgument(const Argument *FA, AttributeSet Attrs);
+#if defined(ENABLE_ACPO)
   void printBasicBlock(const BasicBlock *BB, bool PrintLabelOnly = false);
+#else
+  void printBasicBlock(const BasicBlock *BB);
+#endif
   void printInstructionLine(const Instruction &I);
   void printInstruction(const Instruction &I);
 
@@ -4211,17 +4224,27 @@ void AssemblyWriter::printArgument(const Argument *Arg, AttributeSet Attrs) {
   } else {
     int Slot = Machine.getLocalSlot(Arg);
     assert(Slot != -1 && "expect argument in function here");
+#if defined(ENABLE_ACPO)
     // By default, UnnamedVariablePrefix is empty so it matches original behaviour
     // unless specified.
     Out << " %" << UnnamedVariablePrefix << Slot;
+#else
+    Out << " %" << Slot;
+#endif
   }
 }
 
+
 /// printBasicBlock - This member is called for each basic block in a method.
+#if defined(ENABLE_ACPO)
 void AssemblyWriter::printBasicBlock(const BasicBlock *BB,
                                      bool PrintLabelOnly) {
   assert(BB && BB->getParent() && "block without parent!");
   bool IsEntryBlock = BB == &BB->getParent()->getEntryBlock();
+#else
+void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
+  bool IsEntryBlock = BB == &BB->getParent()->getEntryBlock();
+#endif
   if (BB->hasName()) {              // Print out the label if it exists...
     Out << "\n";
     PrintLLVMName(Out, BB->getName(), LabelPrefix);
@@ -4230,17 +4253,23 @@ void AssemblyWriter::printBasicBlock(const BasicBlock *BB,
     Out << "\n";
     int Slot = Machine.getLocalSlot(BB);
     if (Slot != -1) {
+#if defined(ENABLE_ACPO)
       // By default, UnnamedVariablePrefix is empty so it matches original behaviour
       // unless specified.
       Out << UnnamedVariablePrefix << Slot << ":";
+#else
+      Out << Slot << ":";
+#endif
     } else
       Out << "<badref>:";
   }
 
+#if defined(ENABLE_ACPO)
   if (PrintLabelOnly) {
     Out << "\n";
     return;
   }
+#endif
 
   if (!IsEntryBlock) {
     // Output predecessors for the block.
@@ -4336,9 +4365,13 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     if (SlotNum == -1)
       Out << "<badref> = ";
     else {
+#if defined(ENABLE_ACPO)
       // By default, UnnamedVariablePrefix is empty so it matches original behaviour
       // unless specified.
       Out << '%' << UnnamedVariablePrefix << SlotNum << " = ";
+#else
+      Out << '%' << SlotNum << " = ";
+#endif
     }
   }
 

@@ -323,6 +323,11 @@ std::unique_ptr<InlineAdvice> MLInlineAdvisor::getAdviceImpl(CallBase &CB) {
   auto &Caller = *CB.getCaller();
   auto &Callee = *CB.getCalledFunction();
 
+#if defined(ENABLE_ACPO)
+  LLVM_DEBUG(dbgs() << "Advice on call: " << Caller.getName() << " to "
+                    << Callee.getName() << "\n");
+#endif
+
   auto GetAssumptionCache = [&](Function &F) -> AssumptionCache & {
     return FAM.getResult<AssumptionAnalysis>(F);
   };

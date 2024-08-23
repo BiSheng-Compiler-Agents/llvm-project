@@ -18,6 +18,10 @@
 #include <functional>
 #include <vector>
 
+#if defined(ENABLE_ACPO)
+#include "llvm/Analysis/InlineAdvisor.h"
+#endif
+
 namespace llvm {
 
 class ModulePass;

@@ -100,7 +100,9 @@ void initializeDomPrinterWrapperPassPass(PassRegistry &);
 void initializeDomViewerWrapperPassPass(PassRegistry &);
 void initializeDominanceFrontierWrapperPassPass(PassRegistry&);
 void initializeDominatorTreeWrapperPassPass(PassRegistry&);
+#if defined(ENABLE_ACPO)
 void initializeDumpCallsiteLegacyPass(PassRegistry &);
+#endif
 void initializeDwarfEHPrepareLegacyPassPass(PassRegistry &);
 void initializeEarlyCSELegacyPassPass(PassRegistry&);
 void initializeEarlyCSEMemSSALegacyPassPass(PassRegistry&);
@@ -134,7 +136,9 @@ void initializeGlobalsAAWrapperPassPass(PassRegistry&);
 void initializeGuardWideningLegacyPassPass(PassRegistry&);
 void initializeHardwareLoopsLegacyPass(PassRegistry&);
 void initializeMIRProfileLoaderPassPass(PassRegistry &);
+#if defined(ENABLE_ACPO)
 void initializeInlineAdvisorAnalysisWrapperPass(PassRegistry &);
+#endif
 void initializeIRSimilarityIdentifierWrapperPassPass(PassRegistry&);
 void initializeIRTranslatorPass(PassRegistry&);
 void initializeIVUsersWrapperPassPass(PassRegistry&);
@@ -152,11 +156,13 @@ void initializeInterleavedLoadCombinePass(PassRegistry &);
 void initializeIntervalPartitionPass(PassRegistry&);
 void initializeJMCInstrumenterPass(PassRegistry&);
 void initializeKCFIPass(PassRegistry &);
+#if defined(ENABLE_ACPO)
 void initializeLegacyFAMPass(PassRegistry &);
 void initializeLegacyFunctionPropertiesAnalysisPass(PassRegistry &);
 void initializeLegacyInlinerPassPass(PassRegistry &);
 void initializeLegacyInlineSizeEstimatorAnalysisPass(PassRegistry &);
 void initializeLegacyModuleInlinerWrapperPassPass(PassRegistry &);
+#endif
 void initializeLCSSAVerificationPassPass(PassRegistry&);
 void initializeLCSSAWrapperPassPass(PassRegistry&);
 void initializeLazyBlockFrequencyInfoPassPass(PassRegistry&);

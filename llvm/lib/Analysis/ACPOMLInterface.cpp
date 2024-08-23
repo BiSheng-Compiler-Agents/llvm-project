@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/ACPOMLInterface.h"
 #include "llvm/Analysis/ACPOModelRunner.h"
 #include "llvm/Analysis/FIModelRunner.h"
@@ -1403,3 +1404,4 @@ const std::unordered_map<std::string,
         {"FI", createFI},
 #endif
 };
+#endif

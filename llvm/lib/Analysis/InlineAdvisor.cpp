@@ -27,6 +27,25 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#if defined(ENABLE_ACPO)
+#include "llvm/ADT/StringRef.h"
+#include <unordered_set>
+
+#include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/ACPOFIModel.h"
+#include "llvm/Analysis/DumpFeature.h"
+#include "llvm/Analysis/FunctionPropertiesAnalysis.h"
+#include "llvm/Analysis/InlineModelFeatureMaps.h"
+#include "llvm/Analysis/InlineSizeEstimatorAnalysis.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/InitializePasses.h"
+#include "llvm/Transforms/IPO/Inliner.h"
+#include <memory>
+#endif
+
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 #ifdef LLVM_HAVE_TF_AOT_INLINERSIZEMODEL
@@ -537,6 +556,46 @@ void llvm::emitInlinedIntoBasedOnCost(
       PassName);
 }
 
+#if defined(ENABLE_ACPO)
+CallBase *InlineAdvisor::getInlinableCS(Instruction &I) {
+  if (auto *CS = dyn_cast<CallBase>(&I))
+    if (Function *Callee = CS->getCalledFunction()) {
+      if (!Callee->isDeclaration()) {
+        return CS;
+      }
+    }
+  return nullptr;
+}
+
+// TODO: We can make this faster on large programs by applying
+// this patch from MLGO f46dd19b480496d2ba0a57d12935882e530f2b93.
+// This patch incrementally computes FunctionPropertiesInfo
+// instead of recomputing.
+int64_t InlineAdvisor::getLocalCalls(Function &F) {
+  return FAM.getResult<FunctionPropertiesAnalysis>(F)
+      .DirectCallsToDefinedFunctions;
+}
+
+unsigned InlineAdvisor::getCallLoopLevel(CallBase &CB) const {
+  Function *F = CB.getCaller();
+  BasicBlock *BB = CB.getParent();
+  LoopInfo &LI = FAM.getResult<LoopAnalysis>(*F);
+  return LI.getLoopDepth(BB);
+}
+
+uint64_t InlineAdvisor::getCalleeBlockFreq(CallBase &CB) const {
+  Function *F = CB.getCaller();
+  BasicBlock *BB = CB.getParent();
+  BlockFrequencyInfo &BFI = FAM.getResult<BlockFrequencyAnalysis>(*F);
+  return BFI.getBlockFreq(BB).getFrequency();
+}
+
+unsigned InlineAdvisor::getCallSiteHeight(CallBase *CB) {
+  Function *Caller = CB->getCaller();
+  return FunctionLevels[Caller];
+}
+#endif
+
 InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                              std::optional<InlineContext> IC)
     : M(M), FAM(FAM), IC(IC),
@@ -548,6 +607,35 @@ InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
         std::make_unique<ImportedFunctionsInliningStatistics>();
     ImportedFunctionsStats->setModuleInfo(M);
   }
+#if defined(ENABLE_ACPO)
+  std::unique_ptr<CallGraph> CG(std::make_unique<CallGraph>(M));
+  for (auto I = scc_begin(CG.get()); !I.isAtEnd(); ++I) {
+    const std::vector<CallGraphNode *> &CGNodes = *I;
+    unsigned Level = 0;
+    for (auto *CGNode : CGNodes) {
+      Function *F = CGNode->getFunction();
+      if (!F || F->isDeclaration())
+        continue;
+      for (auto &I : instructions(F)) {
+        if (auto *CS = getInlinableCS(I)) {
+          auto *Called = CS->getCalledFunction();
+          auto Pos = FunctionLevels.find(Called);
+          // In bottom up traversal, an inlinable callee is either in the
+          // same SCC, or to a function in a visited SCC. So not finding its
+          // level means we haven't visited it yet, meaning it's in this SCC.
+          if (Pos == FunctionLevels.end())
+            continue;
+          Level = std::max(Level, Pos->second + 1);
+        }
+      }
+    }
+    for (auto *CGNode : CGNodes) {
+      Function *F = CGNode->getFunction();
+      if (F && !F->isDeclaration())
+        FunctionLevels[F] = Level;
+    }
+  }
+#endif
 }
 
 InlineAdvisor::~InlineAdvisor() {
@@ -638,6 +726,33 @@ std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
                     getMandatoryKind(CB, FAM, getCallerORE(CB));
   return getMandatoryAdvice(CB, Advice);
 }
+
+#if defined(ENABLE_ACPO)
+bool InlineAdvisor::neverInline(CallBase &CB) const {
+  auto &Caller = *CB.getCaller();
+  auto &Callee = *CB.getCalledFunction();
+  auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(Caller);
+  auto MandatoryKind = InlineAdvisor::getMandatoryKind(CB, FAM, ORE);
+  // If this is a "never inline" case, there won't be any changes to internal
+  // state we need to track, so we can just return the base InlineAdvice,
+  // which will do nothing interesting. Same thing if this is a recursive
+  // case.
+  return MandatoryKind == InlineAdvisor::MandatoryInliningKind::Never ||
+         &Caller == &Callee;
+}
+
+bool InlineAdvisor::isCSInlinable(CallBase &CB) const {
+  auto &Callee = *CB.getCalledFunction();
+
+  auto GetAssumptionCache = [&](Function &F) -> AssumptionCache & {
+    return FAM.getResult<AssumptionAnalysis>(F);
+  };
+  auto &TIR = FAM.getResult<TargetIRAnalysis>(Callee);
+  auto IsCallSiteInlinable =
+      llvm::getInliningCostEstimate(CB, TIR, GetAssumptionCache);
+  return !!IsCallSiteInlinable;
+}
+#endif
 
 OptimizationRemarkEmitter &InlineAdvisor::getCallerORE(CallBase &CB) {
   return FAM.getResult<OptimizationRemarkEmitterAnalysis>(*CB.getCaller());

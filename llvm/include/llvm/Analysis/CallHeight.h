@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_CALLHEIGHT
 #define LLVM_ANALYSIS_CALLHEIGHT
 
@@ -70,3 +71,4 @@ Pass *createCallHeightAnalysisWrapper();
 } // namespace llvm
 
 #endif
+#endif // ENABLE_ACPO

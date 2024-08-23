@@ -430,6 +430,9 @@ int main(int argc, char **argv) {
   initializeTransformUtils(Registry);
   initializeInstCombine(Registry);
   initializeTarget(Registry);
+#if defined(ENABLE_ACPO)
+  initializeDumpCallsiteLegacyPass(Registry);
+#endif
   // For codegen passes, only passes that do IR to IR transformation are
   // supported.
   initializeExpandLargeDivRemLegacyPassPass(Registry);

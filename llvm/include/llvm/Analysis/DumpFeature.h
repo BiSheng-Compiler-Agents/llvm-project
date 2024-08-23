@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_DUMPFEATURE
 #define LLVM_ANALYSIS_DUMPFEATURE
 
@@ -192,3 +193,4 @@ operator++(ACPOFIExtendedFeatures::NamedFloatFeatureIndex &n, int);
 } // namespace llvm
 
 #endif
+#endif // ENABLE_ACPO

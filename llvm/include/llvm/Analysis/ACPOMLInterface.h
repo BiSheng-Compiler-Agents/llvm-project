@@ -4,10 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Copyright (C) 2021-2022. Huawei Technologies Co., Ltd. All rights reserved.
-//
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_ACPOML_INTERFACE_H
 #define LLVM_ANALYSIS_ACPOML_INTERFACE_H
 
@@ -480,3 +479,4 @@ std::shared_ptr<ACPOMLInterface> createPersistentCompiledMLIF();
 } // namespace llvm
 
 #endif // LLVM_ANALYSIS_ACPOML_INTERFACE_H
+#endif // ENABLE_ACPO

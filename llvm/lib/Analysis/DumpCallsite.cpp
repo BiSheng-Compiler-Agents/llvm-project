@@ -9,6 +9,7 @@
 // This file implements the ability to dump all callsites in a given function.
 //
 //===----------------------------------------------------------------------===//
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/DumpCallsite.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -80,3 +81,4 @@ PreservedAnalyses DumpCallsitePass::run(Function &F,
   Impl.run(F);
   return PreservedAnalyses::all();
 }
+#endif

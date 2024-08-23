@@ -16,6 +16,15 @@
 #include "llvm/Analysis/Utils/ImportedFunctionsInliningStatistics.h"
 #include "llvm/IR/PassManager.h"
 
+#if defined(ENABLE_ACPO)
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Pass.h"
+#include <utility>
+#endif
+
 namespace llvm {
 
 /// The inliner pass for the new pass manager.

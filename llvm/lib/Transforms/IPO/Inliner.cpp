@@ -64,8 +64,19 @@
 #include <functional>
 #include <utility>
 #include <vector>
-#if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_AUTOTUNER) || defined(ENABLE_ACPO)
 #include "llvm/AutoTuner/AutoTuning.h"
+#endif
+
+#if defined(ENABLE_ACPO)
+#include "llvm/Analysis/ACPOFIModel.h"
+#include "llvm/Analysis/ModelDataCollector.h"
+#include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/Utils/CallGraphUpdater.h"
+#include <optional>
 #endif
 
 using namespace llvm;
@@ -149,6 +160,124 @@ static cl::opt<CallSiteFormat::Format> CGSCCInlineReplayFormat(
                    "<Line Number>:<Column Number>.<Discriminator> (default)")),
     cl::desc("How cgscc inline replay file is formatted"), cl::Hidden);
 
+#if defined(ENABLE_ACPO)
+static cl::opt<bool>
+    ACPOVerboseFI("acpo-verbose-fi", cl::init(false), cl::Hidden,
+                  cl::desc("Print ACPO invocation messages for FI."));
+
+static cl::opt<bool> FeatureDump("enable-fi-feature-dump", cl::init(false));
+
+//  Defined in 'lib/Analysis/ACPOFIModel.cpp'
+extern cl::opt<bool> EnableACPOFI;
+extern cl::opt<bool> EnableAOTFI;
+// In "llvm/lib/Analysis/ModelDataCollector.cpp"
+extern cl::opt<std::string> ACPOModelFile;
+
+namespace {
+/// Class for collecting inlining model data
+class ModelDataFICollector : public ModelDataCollector {
+public:
+  ModelDataFICollector(formatted_raw_ostream &OS, bool OnlyMandatory,
+                       std::string OutputFileName)
+      : ModelDataCollector(OS, OutputFileName), OnlyMandatory(OnlyMandatory) {}
+
+  void collectFeatures(CallBase *CB, InlineAdvisor *IA,
+                       FunctionAnalysisManager *FAM) {
+    bool MandatoryOnly = getOnlyMandatory();
+    resetRegisteredFeatures();
+    ACPOCollectFeatures::FeaturesInfo CallerFeatures{
+        {ACPOCollectFeatures::FeatureIndex::BasicBlockCount,
+         /* ACPOCollectFeatures::Scope::Function, */
+         /* ACPOCollectFeatures::GroupID::FPIRelated, */
+         {FAM, nullptr},
+         {CB->getCaller(), nullptr, nullptr, nullptr, nullptr},
+         {MandatoryOnly, IA}}};
+    ACPOCollectFeatures::FeaturesInfo CalleeFeatures{
+        {ACPOCollectFeatures::FeatureIndex::BasicBlockCount,
+         /* ACPOCollectFeatures::Scope::Function, */
+         /* ACPOCollectFeatures::GroupID::FPIRelated, */
+         {FAM, nullptr},
+         {CB->getCalledFunction(), nullptr, nullptr, nullptr, nullptr},
+         {MandatoryOnly, IA}}};
+    BasicBlock *GlobalBB = CB->getParent();
+    Function *GlobalF = GlobalBB->getParent();
+    Module *GlobalM = GlobalF->getParent();
+    ACPOCollectFeatures::FeatureInfo GlobalFeatureInfo{
+        ACPOCollectFeatures::FeatureIndex::NumOfFeatures,
+        {FAM, nullptr},
+        {GlobalF, CB, GlobalBB, GlobalM, nullptr},
+        {MandatoryOnly, IA}};
+    ACPOCollectFeatures::FeatureInfo CallerInfo{
+        ACPOCollectFeatures::FeatureIndex::NumOfFeatures,
+        {FAM, nullptr},
+        {CB->getCaller(), CB, GlobalBB, GlobalM, nullptr},
+        {MandatoryOnly, IA}};
+    ACPOCollectFeatures::FeatureInfo CalleeInfo{
+        ACPOCollectFeatures::FeatureIndex::NumOfFeatures,
+        {FAM, nullptr},
+        {CB->getCalledFunction(), CB, GlobalBB, GlobalM, nullptr},
+        {MandatoryOnly, IA}};
+
+    registerFeature({ACPOCollectFeatures::Scope::Function}, CalleeInfo,
+                    "callee");
+    registerFeature({ACPOCollectFeatures::Scope::Function}, CallerInfo,
+                    "caller");
+    registerFeature({ACPOCollectFeatures::Scope::CallSite}, GlobalFeatureInfo);
+    registerFeature({ACPOCollectFeatures::Scope::Module}, GlobalFeatureInfo);
+    ModelDataCollector::collectFeatures();
+  }
+  bool getOnlyMandatory() { return OnlyMandatory; }
+
+private:
+  bool OnlyMandatory = false;
+};
+
+llvm::SmallDenseSet<std::pair<CallGraphNode *, CallGraphSCC *>, 4>
+    InlinedInternalEdges =
+        llvm::SmallDenseSet<std::pair<CallGraphNode *, CallGraphSCC *>, 4>();
+} // end anonymous namespace
+
+/// helper function for getting advice with acpo infrastructure
+bool getACPOAdvice(CallBase *CB, std::unique_ptr<ACPOFIModel> &FI,
+                   ModelDataFICollector *MDC, InlineAdvisor *Advisor,
+                   FunctionAnalysisManager *FAM) {
+  bool ShouldInline = false;
+  // ------------------------------------------------------------------------
+  // Begin ACPO invocation
+  if ((EnableACPOFI || EnableAOTFI) && !MDC->getOnlyMandatory() &&
+      !Advisor->neverInline(*CB) && Advisor->isCSInlinable(*CB)) {
+    if (ACPOVerboseFI) {
+      errs() << "--- ACPOModel is activated\n";
+    }
+    MDC->collectFeatures(CB, Advisor, FAM);
+    std::vector<std::pair<std::string, std::string>> Features =
+        MDC->getFeatures();
+    FI->setMLCustomFeatures(Features);
+  }
+  std::unique_ptr<ACPOAdvice> Advice = FI->getAdvice();
+  Constant *Val = Advice->getField("FI-ShouldInline");
+  assert(Val != nullptr);
+  assert(isa<ConstantInt>(Val));
+  ConstantInt *ACPOInline = dyn_cast<ConstantInt>(Val);
+  ShouldInline = ACPOInline->getSExtValue();
+  if ((EnableACPOFI || EnableAOTFI) && ACPOVerboseFI) {
+    errs() << "ACPOModel's inline prediction: " << ShouldInline << "\n";
+  }
+  if (FeatureDump) {
+    MDC->collectFeatures(CB, Advisor, FAM);
+    std::vector<std::pair<std::string, std::string>> Features =
+        MDC->getFeatures();
+    if (MDC->isEmptyOutputFile()) {
+      MDC->printRow(true);
+    }
+    MDC->printRow();
+  }
+  return ShouldInline;
+  // End ACPO Invocation
+  // ---------------------------------------------------------------------
+}
+#endif
+
 /// Return true if the specified inline history ID
 /// indicates an inline history that includes the specified function.
 static bool inlineHistoryIncludes(
@@ -205,6 +334,14 @@ InlinerPass::getAdvisor(const ModuleAnalysisManagerCGSCCProxy::Result &MAM,
 PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
                                    CGSCCAnalysisManager &AM, LazyCallGraph &CG,
                                    CGSCCUpdateResult &UR) {
+#if defined(ENABLE_ACPO)
+  if (EnableACPOFI || EnableAOTFI) {
+    // Need to clear the cache at the beggining of the inliner pass, since during
+    // optimization we may have transofrmed the code which invalidated the cache.
+    ACPOFIModel::clearCache();
+  }
+#endif
+
   const auto &MAMProxy =
       AM.getResult<ModuleAnalysisManagerCGSCCProxy>(InitialC, CG);
   bool Changed = false;
@@ -221,6 +358,10 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
   Advisor.onPassEntry(&InitialC);
 
   auto AdvisorOnExit = make_scope_exit([&] { Advisor.onPassExit(&InitialC); });
+#if defined(ENABLE_ACPO)
+  if (EnableACPOFI || EnableAOTFI)
+    ACPOCollectFeatures::clearFunctionLevel();
+#endif
 
   // We use a single common worklist for calls across the entire SCC. We
   // process these in-order and append new calls introduced during inlining to
@@ -377,8 +518,51 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
         continue;
       }
 
-      std::unique_ptr<InlineAdvice> Advice =
-          Advisor.getAdvice(*CB, OnlyMandatory);
+      std::unique_ptr<InlineAdvice> Advice = nullptr;
+ #if defined(ENABLE_ACPO)
+      std::unique_ptr<ACPOFIModel> FI = nullptr;
+      if (EnableACPOFI || EnableAOTFI) {
+        auto &ORE =
+            FAM.getResult<OptimizationRemarkEmitterAnalysis>(*CB->getCaller());
+        FI = std::make_unique<ACPOFIModel>(
+            CB, &Advisor, &ORE, OnlyMandatory, EnableACPOFI || EnableAOTFI);
+        std::error_code EC;
+        raw_fd_ostream RawOS(ACPOModelFile.getValue(), EC, sys::fs::CD_OpenAlways,
+                             sys::fs::FA_Write, sys::fs::OF_Append);
+        if (EC)
+          errs() << "Could not create/open training data file (Falling back to "
+                    "debug mode): "
+                 << EC.message() << "\n";
+
+        formatted_raw_ostream OS(RawOS);
+        ModelDataFICollector MDC(OS, OnlyMandatory, ACPOModelFile);
+        if (EnableACPOFI)
+          LLVM_DEBUG(dbgs() << "ACPO Python ML infra is activated" << "\n");
+        else if (EnableAOTFI)
+          LLVM_DEBUG(dbgs() << "ACPO AOT C++ ML infra is activated" << "\n");
+        bool ShouldInline = getACPOAdvice(CB, FI, &MDC, &Advisor, &FAM);
+
+        // Check whether we want to inline this callsite.
+        if (!ShouldInline) {
+          FI->recordUnattemptedInlining();
+          continue;
+        } else {
+          ACPOFIModel::invalidateCache(CB);
+        }
+      } else {
+        Advice = Advisor.getAdvice(*CB, OnlyMandatory);
+
+        // Check whether we want to inline this callsite.
+        if (!Advice)
+          continue;
+
+        if (!Advice->isInliningRecommended()) {
+          Advice->recordUnattemptedInlining();
+          continue;
+        }
+      }
+#else
+      Advice = Advisor.getAdvice(*CB, OnlyMandatory);
 
       // Check whether we want to inline this callsite.
       if (!Advice)
@@ -388,6 +572,7 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
         Advice->recordUnattemptedInlining();
         continue;
       }
+#endif
 
       int CBCostMult =
           getStringFnAttrAsInt(
@@ -396,6 +581,13 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
 
       // Setup the data structure used to plumb customization into the
       // `InlineFunction` routine.
+#if defined(ENABLE_ACPO)
+      if ((EnableACPOFI || EnableAOTFI) && ACPOVerboseFI) {
+        Function &F2 = *CB->getCaller();
+        LLVM_DEBUG(dbgs() << "check: " << F2.getName() << ", "
+                          << Callee.getName() << "\n");
+      }
+#endif
       InlineFunctionInfo IFI(
           GetAssumptionCache, PSI,
           &FAM.getResult<BlockFrequencyAnalysis>(*(CB->getCaller())),
@@ -405,7 +597,14 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
           InlineFunction(*CB, IFI, /*MergeAttributes=*/true,
                          &FAM.getResult<AAManager>(*CB->getCaller()));
       if (!IR.isSuccess()) {
+#if defined(ENABLE_ACPO)
+        if (EnableACPOFI || EnableAOTFI)
+          FI->recordUnsuccessfulInlining(IR);
+        else
+          Advice->recordUnsuccessfulInlining(IR);
+#else
         Advice->recordUnsuccessfulInlining(IR);
+#endif
         continue;
       }
 
@@ -494,10 +693,24 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
           DeadFunctionsInComdats.push_back(&Callee);
         }
       }
+#if defined(ENABLE_ACPO)
+      if (EnableACPOFI || EnableAOTFI) {
+        if (CalleeWasDeleted)
+          FI->recordInliningWithCalleeDeleted();
+        else
+          FI->recordInlining();
+      } else {
+        if (CalleeWasDeleted)
+          Advice->recordInliningWithCalleeDeleted();
+        else
+          Advice->recordInlining();
+      }
+#else
       if (CalleeWasDeleted)
         Advice->recordInliningWithCalleeDeleted();
       else
         Advice->recordInlining();
+#endif
     }
 
     // Back the call index up by one to put us in a good position to go around

@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/ACPOCollectFeatures.h"
 #include "llvm/ADT/SCCIterator.h"
 // The ACPOFIModel.h currently contains only the cache system for
@@ -1256,3 +1257,4 @@ operator++(ACPOCollectFeatures::FeatureIndex &N, int) {
 }
 
 } // namespace llvm
+#endif // ENABLE_ACPO

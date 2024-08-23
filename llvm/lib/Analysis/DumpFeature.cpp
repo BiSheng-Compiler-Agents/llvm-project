@@ -9,6 +9,8 @@
 // This file implements dumping features for functions in an scc.
 //
 //===----------------------------------------------------------------------===//
+
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/DumpFeature.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/CallHeight.h"
@@ -573,3 +575,4 @@ operator++(ACPOFIExtendedFeatures::NamedFloatFeatureIndex &n, int) {
   ++n;
   return res;
 }
+#endif

@@ -10,6 +10,8 @@
 // collected on a given ACPOModel class from all available features.
 //
 //===----------------------------------------------------------------------===//
+
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_ACPOCOLLECTFEATURES_H
 #define LLVM_ANALYSIS_ACPOCOLLECTFEATURES_H
 #include "llvm/Analysis/InlineAdvisor.h"
@@ -294,3 +296,4 @@ operator++(ACPOCollectFeatures::FeatureIndex &, int);
 
 } // namespace llvm
 #endif // LLVM_ANALYSIS_ACPOCOLLECTFEATURES_H
+#endif // ENABLE_ACPO
