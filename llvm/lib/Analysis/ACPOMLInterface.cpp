@@ -146,7 +146,15 @@ ACPOMLPythonInterface::ACPOMLPythonInterface() : NextID{0} {
   }
 
   int32_t PID = (int32_t) llvm::sys::Process::getProcessId();
-  std::string ExecPython = "/usr/bin/python3";
+  std::string ExecPython;
+  llvm::ErrorOr<std::string> Res = llvm::sys::findProgramByName("python3");
+  if (std::error_code EC = Res.getError()) {
+      LLVM_DEBUG(dbgs() << "python3 could not be found, error_code " << EC.value() << "\n");
+      return;
+  } else {
+    ExecPython = Res.get();
+    LLVM_DEBUG(dbgs() << "python3 version found in " << ExecPython << "\n");
+  }
   std::string
       PythonScript = *Env + "/" + std::string(ACPO_ML_PYTHON_INTERFACE_PY);
   std::string PIDStr = std::to_string(PID);
