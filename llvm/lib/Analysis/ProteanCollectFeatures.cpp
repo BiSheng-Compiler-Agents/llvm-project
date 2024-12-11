@@ -151,7 +151,7 @@ public:
     if (CB)
       Out += "Callee,Caller,";
     if (L)
-      Out += L->getName().str() + ",";
+      Out += "Loop,";
 
     for (const auto &P : getIRFileNameMap()) {
       Out += P.getKey();
@@ -190,7 +190,6 @@ public:
       Out += ",";
     }
 
-    std::sort(Features.begin(), Features.end());
     for (unsigned I = 0, E = Features.size(); I != E; ++I) {
       // First value does not get a comma
       if (I)
@@ -2261,6 +2260,8 @@ ProteanCollectFeatures::FeatureValueMap ProteanCollectFeatures::getFeaturesPair(
     }
     auto CalculateFunction = It->second;
     CalculateFunction(*this, GlobalFeatureInfo);
+    LLVM_DEBUG(dbgs() << "Protean Feature " << getFeatureName(Idx) << ": "
+                      << FeatureToValue[Idx] << "\n");
   }
 
   return FeatureToValue;
@@ -2706,7 +2707,7 @@ operator++(ProteanFIExtendedFeatures::NamedFloatFeatureIndex &n, int) {
 
 PreservedAnalyses CollectFeaturesPass::run(Module &M,
                                            ModuleAnalysisManager &AM) {
-  LLVM_DEBUG(dbgs() << "Collecting Inlining Features");
+  LLVM_DEBUG(dbgs() << "Collecting Inlining Features\n");
   FunctionAnalysisManager &FAM =
       AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
@@ -2797,9 +2798,6 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
 PreservedAnalyses LoopCollectFeaturesPass::run(Loop &L, LoopAnalysisManager &AM,
                                                LoopStandardAnalysisResults &AR,
                                                LPMUpdater &U) {
-  if (!EnableLoopCollectFeature) {
-    return PreservedAnalyses::all();
-  }
   LLVM_DEBUG(dbgs() << "Collecting Loop Features");
   std::error_code EC;
   raw_fd_ostream RawOS(ProteanLoopModelFile.getValue(), EC,
