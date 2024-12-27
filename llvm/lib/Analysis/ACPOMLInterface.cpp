@@ -1381,6 +1381,33 @@ void ACPOMLCPPInterface::readOutputs(
   }
 }
 
+size_t ACPOMLCPPInterface::getModelFeaturesSize(std::string ModelSpecFile) {
+  std::vector<std::pair<std::string, std::string>> Features{};
+  readFeatures(ModelSpecFile, Features);
+
+  size_t totalBufferSize = 0;
+  for (const auto &pair : Features) {
+    totalBufferSize += pair.first.size() + 1; // +1 for null terminator
+
+    if (pair.second == "int64") {
+      totalBufferSize += sizeof(int64_t);
+    } else if (pair.second == "int32") {
+      totalBufferSize += sizeof(int32_t);
+    } else if (pair.second == "int") {
+      totalBufferSize += sizeof(int);
+    } else if (pair.second == "float64") {
+      totalBufferSize += sizeof(double);
+    } else if (pair.second == "float32") {
+      totalBufferSize += sizeof(float);
+    } else {
+      LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid feature type "
+                        << pair.second << "\n");
+    }
+  }
+
+  return totalBufferSize;
+}
+
 std::shared_ptr<ACPOMLInterface> llvm::createPersistentCompiledMLIF() {
   if (PersistentMLIF == nullptr) {
     PersistentMLIF = std::make_shared<ACPOMLCPPInterface>();
@@ -1396,7 +1423,7 @@ createIR2Score(std::vector<std::pair<std::string, std::string>> Inputs,
                StringRef Decision) {
   // PLACEHOLDER
   LLVMContext Ctx;
-  return std::make_unique<IR2ScoreModelRunner>(Ctx, Inputs, Decision);
+  return std::make_unique<ProteanModelRunner>(Ctx, Inputs, Decision);
 }
 
 // Generate map using ifdefs for now, in the future we could have this

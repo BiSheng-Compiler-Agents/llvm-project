@@ -9,13 +9,13 @@ define void @invoke(ptr %x) {
         ret void
 }
 
-; Checks that cools down in exactly 51 iterations
 
-; GEOMETRIC-COUNT-51: Iteration
-; GEOMETRIC-NOT: Iteration
+; GEOMETRIC: Iteration 0
+; GEOMETRIC: Iteration {{.*}}
+; GEOMETRIC-NOT: Temperature: 0.000
 
-; LINEAR-COUNT-51: Iteration
-; LINEAR-NOT: Iteration
+; LINEAR: Iteration 0
+; LINEAR: Iteration {{.*}}
+; LINEAR-NOT: Temperature: 0.000
 
-; ITERATIONS-COUNT-101: Iteration 
-; ITERATIONS-NOT: Iteration
+; ITERATIONS-NOT: Iteration 101

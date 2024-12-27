@@ -36,12 +36,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <llvm/IR/LLVMContext.h>
 #include <memory>
 #include <random>
 #include <sstream>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <unordered_map>
@@ -51,6 +53,14 @@
 #undef DEBUG_TYPE
 #define DEBUG_TYPE "protean"
 #define BISHENG_INSTALL_DIR "BISHENG_INSTALL_DIR"
+
+struct SharedMemoryData {
+  size_t bitcode_size;
+  bool ModLevelIPC;
+  size_t featureCount;
+  size_t dataSize;
+  size_t dataOffset;
+};
 
 void SimulatedAnnealingProtean::generatePermutationsWithRepetitions(
     std::string &Recipes, std::string &Current, int MaxSeqLength) {
@@ -103,7 +113,9 @@ public:
     }
     for (int i = 0; i < headers.size(); i++) {
       Features.insert(Features.end(), {std::make_pair(headers[i], values[i])});
+      LLVM_DEBUG(llvm::dbgs() << "{" << headers[i] << " " << values[i] << "}");
     }
+    LLVM_DEBUG(llvm::dbgs() << "\n");
   }
 };
 } // namespace llvm
@@ -122,8 +134,8 @@ SimulatedAnnealingProtean::SimulatedAnnealingProtean(
     int RngVal, CoolingType CoolingSchedule, double MaxTemperature,
     double MinTemperature, unsigned int MaxIterations, IRCostFunction CostType,
     std::string OutputFilename, bool ProteanOutputTable, bool UseProteanCollect,
-    bool UseAOTModel, unsigned int InitialSampleSize, double MutationRate,
-    double CrossoverRate, unsigned int PopulationSize,
+    bool ModLevelIPC, bool UseAOTModel, unsigned int InitialSampleSize,
+    double MutationRate, double CrossoverRate, unsigned int PopulationSize,
     CrossoverFunction CrossoverType, MutationFunction MutationType)
     : Generator{new PhaseOrderGeneratorBase(InitialSampleSize, PopulationSize,
                                             MutationRate, CrossoverRate,
@@ -132,10 +144,11 @@ SimulatedAnnealingProtean::SimulatedAnnealingProtean(
       OutputFilename(OutputFilename), MaxTemperature(MaxTemperature),
       MinTemperature(MinTemperature), MaxIterations(MaxIterations),
       ProteanOutputTable(ProteanOutputTable),
-      UseProteanCollect(UseProteanCollect), UseAOTModel(UseAOTModel),
-      InitialSampleSize(InitialSampleSize), MutationRate(MutationRate),
-      CrossoverRate(CrossoverRate), PopulationSize(PopulationSize),
-      CrossoverType(CrossoverType), MutationType(MutationType) {
+      UseProteanCollect(UseProteanCollect), ModLevelIPC(ModLevelIPC),
+      UseAOTModel(UseAOTModel), InitialSampleSize(InitialSampleSize),
+      MutationRate(MutationRate), CrossoverRate(CrossoverRate),
+      PopulationSize(PopulationSize), CrossoverType(CrossoverType),
+      MutationType(MutationType) {
   // Setting up the recipe string to 5
   std::string RecipeStr = "01234";
   std::string Current;
@@ -162,12 +175,170 @@ std::string formatDouble(double Num, int Precision) {
   return D.substr(0, D.find_last_of(".") + Precision + 1);
 }
 
+int createSharedMemory(const char *shm_name, size_t shm_size,
+                       void **shared_memory, bool ModLevelIPC) {
+  int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+  if (shm_fd == -1) {
+    perror("shm_open");
+    return -1;
+  }
+
+  // Set the size of the shared memory object
+  if (ftruncate(shm_fd, shm_size) == -1) {
+    perror("ftruncate");
+    return -1;
+  }
+
+  *shared_memory =
+      mmap(nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (*shared_memory == MAP_FAILED) {
+    perror("mmap");
+    return -1;
+  }
+
+  SharedMemoryData *header = (SharedMemoryData *)*shared_memory;
+  header->dataSize = shm_size - sizeof(SharedMemoryData);
+  header->ModLevelIPC = ModLevelIPC;
+  header->dataOffset = sizeof(SharedMemoryData);
+
+  close(shm_fd);
+  return 0;
+}
+
+llvm::Expected<std::unique_ptr<llvm::Module>>
+readModuleFromSharedMemory(const char *shm_name, llvm::LLVMContext &Context) {
+  int shm_fd = shm_open(shm_name, O_RDONLY, 0666);
+  if (shm_fd == -1) {
+    perror("shm_open");
+    return llvm::make_error<llvm::StringError>("shm_open failed",
+                                               llvm::inconvertibleErrorCode());
+  }
+
+  void *shared_memory =
+      mmap(nullptr, sizeof(SharedMemoryData), PROT_READ, MAP_SHARED, shm_fd, 0);
+
+  if (shared_memory == MAP_FAILED) {
+    llvm::errs() << "FAILED\n";
+    perror("mmap");
+    close(shm_fd);
+    return llvm::make_error<llvm::StringError>("mmap failed",
+                                               llvm::inconvertibleErrorCode());
+  }
+
+  SharedMemoryData *shared_data =
+      static_cast<SharedMemoryData *>(shared_memory);
+  size_t bitcode_size = shared_data->bitcode_size;
+
+  munmap(shared_memory, sizeof(SharedMemoryData));
+
+  // Remap the shared memory with the correct size.
+  shared_memory = mmap(nullptr, sizeof(SharedMemoryData) + bitcode_size,
+                       PROT_READ, MAP_SHARED, shm_fd, 0);
+  if (shared_memory == MAP_FAILED) {
+    perror("mmap");
+    close(shm_fd);
+    return llvm::make_error<llvm::StringError>("mmap failed",
+                                               llvm::inconvertibleErrorCode());
+  }
+
+  shared_data = static_cast<SharedMemoryData *>(shared_memory);
+
+  const int MAX_BITCODE_SIZE = 200000;
+  if (bitcode_size > MAX_BITCODE_SIZE) {
+    llvm::errs() << "Error: Bitcode size exceeds maximum.\n";
+    close(shm_fd);
+    return llvm::make_error<llvm::StringError>("mmap failed",
+                                               llvm::inconvertibleErrorCode());
+  }
+
+  std::vector<char> bitcode_buffer(bitcode_size);
+  memcpy(bitcode_buffer.data(), (char *)shared_data + shared_data->dataOffset,
+         bitcode_size);
+
+  llvm::MemoryBufferRef bufferRef(
+      llvm::StringRef(bitcode_buffer.data(), bitcode_size), "shared_memory");
+  llvm::Expected<std::unique_ptr<llvm::Module>> moduleOrErr =
+      llvm::parseBitcodeFile(bufferRef, Context);
+
+  munmap(shared_memory, sizeof(SharedMemoryData) + bitcode_size);
+  close(shm_fd);
+
+  return moduleOrErr;
+}
+
+void readFeaturesFromSharedMemory(
+    const char *shm_name,
+    std::vector<std::pair<std::string, std::string>> &Features) {
+  int shm_fd = shm_open(shm_name, O_RDWR, 0666);
+  if (shm_fd == -1) {
+    perror("shm_open");
+    return;
+  }
+
+  SharedMemoryData *shared_data =
+      (SharedMemoryData *)mmap(nullptr, sizeof(SharedMemoryData),
+                               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (shared_data == MAP_FAILED) {
+    perror("mmap (reader)");
+    close(shm_fd);
+    return;
+  }
+  size_t shm_size = sizeof(SharedMemoryData) + shared_data->dataSize;
+
+  munmap(shared_data, 0);
+  shared_data = (SharedMemoryData *)mmap(
+      nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (shared_data == MAP_FAILED) {
+    perror("mmap (remap reader)");
+    return;
+  }
+
+  char *ptr = (char *)shared_data + shared_data->dataOffset;
+  char *end_ptr = (char *)shared_data + shm_size;
+
+  for (size_t i = 0; i < shared_data->featureCount; ++i) {
+    size_t keySize = strlen(ptr) + 1;
+    std::string key(ptr);
+    ptr += keySize;
+
+    if (ptr + sizeof(float) > end_ptr) {
+      llvm::errs() << "Buffer overflow prevented while copying value for key\n";
+      break;
+    }
+    float floatValue;
+    memcpy(&floatValue, ptr, sizeof(float));
+    ptr += sizeof(float);
+
+    std::stringstream ss;
+    ss << std::fixed << std::setprecision(6) << floatValue;
+    std::string value = ss.str();
+
+    Features.push_back(std::make_pair(key, value));
+  }
+
+  munmap(shared_data, shm_size);
+  close(shm_fd);
+}
+
+void cleanupSharedMemory(const char *shm_name, size_t shm_size,
+                         void *shared_memory) {
+  if (shared_memory != nullptr) {
+    munmap(shared_memory, shm_size);
+    shm_unlink(shm_name);
+  }
+}
+
 void SimulatedAnnealingProtean::run() {
-  SimulatedAnnealingProtean::State S =
-      Generator->generateRecipeGenetic(AllRecipes, "", 0, 100);
+  SimulatedAnnealingProtean::State S = Generator->generateRecipe("01234");
   SimulatedAnnealingProtean::State SNew = S;
   setCurState(SNew);
   setFinalState(SNew);
+
+  llvm::LLVMContext Context;
+  std::unique_ptr<llvm::IR2ScoreModel> IRModel =
+      std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel);
+  IRModel->setProteanCollect(UseProteanCollect);
+
   std::unordered_set<std::string> ExploredRecipes;
   for (int Iteration = 0; Iteration < this->MaxIterations; ++Iteration) {
     double Temp = temperature(Iteration);
@@ -176,7 +347,12 @@ void SimulatedAnnealingProtean::run() {
           AllRecipes, PhaseOrderGeneratorBase::recipesToString(S), Iteration,
           Temp);
     }
-    ExploredRecipes.insert(PhaseOrderGeneratorBase::recipesToString(SNew));
+    std::string SNewStr = PhaseOrderGeneratorBase::recipesToString(SNew);
+    if (ExploredRecipes.find(SNewStr) != ExploredRecipes.end()) {
+      LLVM_DEBUG(llvm::dbgs() << "Skipping " << SNewStr << "...\n");
+      continue;
+    }
+    ExploredRecipes.insert(SNewStr);
 
     setCurState(SNew);
     LLVM_DEBUG(llvm::dbgs()
@@ -198,6 +374,23 @@ void SimulatedAnnealingProtean::run() {
 
     if (Temp <= 0.1) {
       break;
+    }
+
+    const int MAX_BITCODE_SIZE = 200000;
+    const char *shm_name = "/shm";
+    void *shared_memory = nullptr;
+    size_t shm_size;
+    if (ModLevelIPC)
+      shm_size = sizeof(SharedMemoryData) + MAX_BITCODE_SIZE;
+    else
+      shm_size = IRModel->getModelFeaturesSize() + sizeof(SharedMemoryData);
+
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (createSharedMemory(shm_name, shm_size, &shared_memory, ModLevelIPC) !=
+        0) {
+      LLVM_DEBUG(llvm::dbgs() << "Shared memory initialization error.\n");
+      return;
     }
 
     // Fork a new child process and compile with the new recipe.
@@ -262,6 +455,8 @@ void SimulatedAnnealingProtean::run() {
           "-" + PhaseOrderGeneratorBase::recipesToString(SNew));
       std::remove(NewOutputFilename.c_str());
     }
+
+    cleanupSharedMemory(shm_name, shm_size, shared_memory);
   }
   LLVM_DEBUG(llvm::dbgs() << "Explored Recipes Size: " << ExploredRecipes.size()
                           << "\n");
@@ -295,16 +490,19 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
 
 double SimulatedAnnealingProtean::irAnalysisCost(
     const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
+  static std::set<std::string> previousRecipes;
+  static std::set<std::string> previousModuleIdentifiers;
   std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
   llvm::LLVMContext Context;
   llvm::SMDiagnostic Err;
-  std::unique_ptr<llvm::Module> M =
-      llvm::parseIRFile(OutputFilename, Err, Context);
-  if (!M) {
-    Err.print("IR parsing error", llvm::errs());
-    return 1;
-  }
   std::vector<std::pair<std::string, std::string>> Features;
+  std::unique_ptr<llvm::Module> M;
+
+  if (previousRecipes.find(RecipeStr) == previousRecipes.end()) {
+    LLVM_DEBUG(llvm::dbgs() << "Recipe changed\n");
+    previousRecipes.insert(RecipeStr);
+  }
+
   float Cost = 1;
   std::optional<std::string> BishengAcpoDir =
       llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
@@ -313,15 +511,40 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     return -1;
   }
   if (UseProteanCollect) {
-    std::error_code EC;
-    std::string SAModelFile = "Simulated-annealing-model";
-    llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
-                               llvm::sys::fs::FA_Write,
-                               llvm::sys::fs::OF_Append);
-    llvm::formatted_raw_ostream OS(RawOS);
-    llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
-    MDC.collectFeatures(M);
-    Features = MDC.getFeatures();
+    if (ModLevelIPC) {
+      std::error_code EC;
+      std::string SAModelFile = "Simulated-annealing-model";
+      llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
+                                 llvm::sys::fs::FA_Write,
+                                 llvm::sys::fs::OF_Append);
+      llvm::formatted_raw_ostream OS(RawOS);
+      llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
+
+      LLVM_DEBUG(llvm::dbgs() << "Parsing module\n");
+      const char *shm_name = "/shm";
+      llvm::Expected<std::unique_ptr<llvm::Module>> moduleOrErr =
+          readModuleFromSharedMemory(shm_name, Context);
+
+      if (moduleOrErr) {
+        M = std::move(moduleOrErr.get());
+        LLVM_DEBUG(llvm::dbgs() << "Module read from shared memory.\n");
+      } else {
+        llvm::errs() << "Error reading module: "
+                     << llvm::toString(moduleOrErr.takeError()) << "\n";
+      }
+
+      if (previousModuleIdentifiers.find(M->getModuleIdentifier()) ==
+          previousModuleIdentifiers.end()) {
+        // New identifier found
+        LLVM_DEBUG(llvm::dbgs() << "Module Identifier changed\n");
+        previousModuleIdentifiers.insert(M->getModuleIdentifier());
+      }
+      MDC.collectFeatures(M);
+      Features = MDC.getFeatures();
+    } else {
+      const char *shm_name = "/shm";
+      readFeaturesFromSharedMemory(shm_name, Features);
+    }
   } else {
     std::optional<std::string> IR2VecBinaryPath =
         llvm::sys::Process::GetEnv("IR2VEC_PATH");
@@ -384,6 +607,11 @@ double SimulatedAnnealingProtean::irAnalysisCost(
   IRModel->setProteanCollect(UseProteanCollect);
   IRModel->setMLCustomFeatures(Features);
   std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();
+  if (!Score) {
+    LLVM_DEBUG(llvm::dbgs() << "Score is null\n");
+  } else {
+    LLVM_DEBUG(llvm::dbgs() << "Score is not null\n");
+  }
   llvm::Constant *Val = Score->getField("IRSCORE");
   assert(Val != nullptr);
   assert(llvm::isa<llvm::ConstantFP>(Val));
@@ -392,6 +620,11 @@ double SimulatedAnnealingProtean::irAnalysisCost(
   Cost = APCost.convertToFloat();
 
   LLVM_DEBUG(llvm::dbgs() << "Cost returned as " + std::to_string(Cost) + "\n");
+  if (!Cost) {
+    LLVM_DEBUG(llvm::dbgs() << "Cost is null\n");
+  } else {
+    LLVM_DEBUG(llvm::dbgs() << "Cost is not null\n");
+  }
   CostMap[RecipeStr] = Cost;
   return Cost;
 }
@@ -485,6 +718,7 @@ SimulatedAnnealingProtean::cost(const SimulatedAnnealingProtean::State &S) {
     return CostMap[RecipeStr];
   }
   std::string NewOutputFilename = OutputFilename;
+  assert(NewOutputFilename.find_last_of(".") != std::string::npos);
   NewOutputFilename.insert(NewOutputFilename.find_last_of("."),
                            "-" + PhaseOrderGeneratorBase::recipesToString(S));
   switch (CostType) {
