@@ -38,6 +38,8 @@ public:
 
   void setProteanCollect(bool ProteanCollect);
 
+  size_t getModelFeaturesSize();
+
 protected:
   // Interface to run the MLInference/default advisor and get advice from the
   // model/default advisor

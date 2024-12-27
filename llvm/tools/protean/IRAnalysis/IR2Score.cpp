@@ -52,6 +52,19 @@ void IR2ScoreModel::setProteanCollect(bool ProteanCollect) {
   UseProteanCollect = ProteanCollect;
 }
 
+size_t IR2ScoreModel::getModelFeaturesSize() {
+  std::string ModelFile;
+  if (UseProteanCollect) {
+    ModelFile = "model-ir2scoreprotean.acpo";
+  } else {
+    ModelFile = "model-ir2scoreir2vec.acpo";
+  }
+
+  std::shared_ptr<llvm::ACPOMLCPPInterface> CppInterface =
+      std::make_shared<llvm::ACPOMLCPPInterface>();
+  return CppInterface->getModelFeaturesSize(ModelFile);
+}
+
 std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   // get performance results from module metadata
   // Get module flags
@@ -59,7 +72,15 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   std::unique_ptr<ACPOAdvice> Score = std::make_unique<ACPOAdvice>();
   assert(MLIF != nullptr);
 
-  std::string ModelFile = "model-ir2score.acpo";
+  std::string ModelFile;
+  std::string OutputName;
+  if (UseProteanCollect) {
+    ModelFile = "model-ir2scoreprotean.acpo";
+    OutputName = "IRSCOREPROTEAN";
+  } else {
+    ModelFile = "model-ir2scoreir2vec.acpo";
+    OutputName = "IRSCORE";
+  }
   LLVM_DEBUG(llvm::dbgs() << "Loading model from IR2ScoreModel..\n");
   if (!MLIF->loadModel(ModelFile)) {
     LLVM_DEBUG(llvm::dbgs()
@@ -78,7 +99,7 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   }
   bool ModelRunOK = MLIF->runModel("IR2SCORE");
   assert(ModelRunOK);
-  float IRScore = MLIF->getModelResultF("IRSCORE");
+  float IRScore = MLIF->getModelResultF(OutputName);
   LLVM_DEBUG(llvm::dbgs() << "Found IRScore: " << IRScore << '\n');
   assert(getContextPtr() != nullptr);
   Score->addField(

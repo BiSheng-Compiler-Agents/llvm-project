@@ -57,6 +57,7 @@ public:
                                 std::string Recipe, int Iteration,
                                 double Temperature);
   Recipes generateRecipe(std::vector<std::string> &AllRecipes, int Iteration);
+  Recipes generateRecipe(std::string Recipe);
 
 private:
   static std::unordered_map<Recipe, std::string> RecipeToPassOrders;

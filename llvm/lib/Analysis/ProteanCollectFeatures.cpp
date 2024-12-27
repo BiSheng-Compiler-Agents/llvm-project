@@ -58,14 +58,34 @@
 #include <string>
 #include <unordered_map>
 #define DEBUG_TYPE "proteanFC"
+#include "llvm/Bitcode/BitcodeWriter.h"
+#include <cstring>
+#include <fcntl.h>
+#include <iostream>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#define HEADER_FLAG "proteanFeatureHeaders"
+#define VALUE_FLAG "proteanFeatureValues"
+#define MAX_BITCODE_SIZE 200000
+
+struct SharedMemoryData {
+  size_t bitcode_size;
+  bool ModLevelIPC;
+  size_t featureCount;
+  size_t dataSize;
+  size_t dataOffset;
+};
 
 // In "llvm/lib/Analysis/ModelDataCollector.cpp"
 extern llvm::cl::opt<std::string> ProteanModelFile;
 extern llvm::cl::opt<std::string> ProteanLoopModelFile;
+
+// In "llvm/lib/Passes/PassBuilderPipelines.cpp"
+extern llvm::cl::opt<bool> UseProteanInitialPasses;
 using namespace LoopTools;
 namespace llvm {
-static cl::opt<bool> FeatureDump("enable-protean-feature-dump",
-                                 cl::init(false));
+static cl::opt<bool> FeatureDump("enable-protean-feature-dump", cl::init(true));
 static cl::opt<bool> EnableLoopCollectFeature("enable-loop-collect-feature",
                                               cl::init(false));
 
@@ -221,12 +241,167 @@ public:
     return PathToFile[(int)PathToFile.size() - 1];
   }
 
+  void addModuleFlags(Module *M) {
+    std::vector<std::string> AllFeatures =
+        ProteanCollectFeatures::getAllFeatures();
+    std::unordered_map<std::string, float> FinalFeatures;
+    for (const std::string &Feature : AllFeatures) {
+      FinalFeatures[Feature] = 0;
+    }
+
+    for (auto &FeatureValues : RowsFeatureValues) {
+      for (const std::string &Feature : AllFeatures) {
+        if (FeatureValues.find(Feature) != FeatureValues.end()) {
+          FinalFeatures[Feature] += std::stof(FeatureValues[Feature]);
+        }
+      }
+    }
+
+    std::vector<Metadata *> HeaderData;
+    std::vector<Metadata *> ValueData;
+    for (const std::string &Feature : AllFeatures) {
+      HeaderData.push_back(llvm::MDString::get(M->getContext(), Feature));
+      ValueData.push_back(llvm::MDString::get(
+          M->getContext(), std::to_string(FinalFeatures[Feature])));
+    }
+    auto *HeaderNode = MDTuple::getDistinct(M->getContext(), HeaderData);
+    auto *ValueNode = MDTuple::getDistinct(M->getContext(), ValueData);
+
+    if (M->getModuleFlag(HEADER_FLAG) && M->getModuleFlag(VALUE_FLAG)) {
+      return; // Prevent duplicate insertions
+    }
+
+    if (!HeaderData.empty() && !ValueData.empty()) {
+      M->addModuleFlag(llvm::Module::Append, HEADER_FLAG, HeaderNode);
+      M->addModuleFlag(llvm::Module::Append, VALUE_FLAG, ValueNode);
+    }
+    
+    if (UseProteanInitialPasses) {
+      if (shareModule())
+        writeModule(M);
+      else
+        writeFeatures(FinalFeatures);
+    }
+  }
+
+  bool shareModule() {
+    const char *shm_name = "/shm";
+    int shm_fd = shm_open(shm_name, O_RDWR, 0666);
+    if (shm_fd == -1) {
+      perror("shm_open");
+    }
+
+    SharedMemoryData *shared_data =
+        (SharedMemoryData *)mmap(0, sizeof(SharedMemoryData),
+                                 PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shared_data == MAP_FAILED) {
+      perror("mmap (child)");
+      close(shm_fd);
+    }
+
+    bool result = shared_data->ModLevelIPC;
+
+    munmap(shared_data, sizeof(SharedMemoryData));
+    close(shm_fd);
+
+    return result;
+  }
+
+  void writeFeatures(std::unordered_map<std::string, float> FinalFeatures) {
+    const char *shm_name = "/shm";
+    int shm_fd = shm_open(shm_name, O_RDWR, 0666);
+    if (shm_fd == -1) {
+      perror("shm_open");
+      return;
+    }
+
+    SharedMemoryData *shared_data =
+        (SharedMemoryData *)mmap(0, sizeof(SharedMemoryData),
+                                 PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shared_data == MAP_FAILED) {
+      perror("mmap (child)");
+      close(shm_fd);
+      return;
+    }
+
+    shared_data->featureCount = FinalFeatures.size();
+    size_t shm_size = sizeof(SharedMemoryData) + shared_data->dataSize;
+
+    munmap(shared_data, sizeof(SharedMemoryData));
+    shared_data = (SharedMemoryData *)mmap(0, shm_size, PROT_READ | PROT_WRITE,
+                                           MAP_SHARED, shm_fd, 0);
+    if (shared_data == MAP_FAILED) {
+      perror("mmap(remap) (child)");
+      close(shm_fd);
+      return;
+    }
+
+    char *ptr = (char *)shared_data + shared_data->dataOffset;
+    char *end_ptr = (char *)shared_data + shm_size;
+
+    for (const auto &pair : FinalFeatures) {
+      size_t keySize = pair.first.size() + 1;
+      size_t valueSize = sizeof(pair.second);
+
+      if (ptr + keySize + valueSize > end_ptr) {
+        LLVM_DEBUG(
+            dbgs() << "Buffer overflow prevented while copying value for key: "
+                   << pair.first.c_str() << "\n");
+        break;
+      }
+      strcpy(ptr, pair.first.c_str());
+      ptr += keySize;
+
+      memcpy(ptr, &pair.second, valueSize);
+      ptr += valueSize;
+    }
+    munmap(shared_data, shm_size);
+    close(shm_fd);
+  }
+
+  void writeModule(llvm::Module *M) {
+    const char *shm_name = "/shm";
+    int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+      perror("shm_open");
+      return;
+    }
+
+    SharedMemoryData *shared_data =
+        (SharedMemoryData *)mmap(0, sizeof(SharedMemoryData) + MAX_BITCODE_SIZE,
+                                 PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shared_data == MAP_FAILED) {
+      perror("mmap");
+      close(shm_fd);
+      return;
+    }
+
+    std::string buffer;
+    llvm::raw_string_ostream os(buffer);
+    llvm::WriteBitcodeToFile(*M, os);
+    os.flush();
+
+    size_t bitcode_size = buffer.size();
+    if (bitcode_size > MAX_BITCODE_SIZE) {
+      LLVM_DEBUG(dbgs() << "Error: Bitcode size exceeds maximum.\n");
+      close(shm_fd);
+      return;
+    }
+
+    shared_data->bitcode_size = bitcode_size;
+
+    char *ptr = (char *)shared_data + shared_data->dataOffset;
+    memcpy(ptr, buffer.data(), bitcode_size);
+
+    munmap(shared_data, sizeof(SharedMemoryData) + MAX_BITCODE_SIZE);
+    close(shm_fd);
+  }
+
   void formatOutput() {
     std::vector<std::string> Lines = splitByChar(TempOutput, '\n');
 
     std::vector<std::string> AllFeatures =
         ProteanCollectFeatures::getAllFeatures();
-    std::vector<std::unordered_map<std::string, std::string>> RowsFeatureValues;
     std::vector<std::string> IndexToFeature;
     std::unordered_map<std::string, std::string> ModuleFeaturesValues;
     bool ModuleLevel = true;
@@ -296,6 +471,7 @@ public:
 private:
   bool OnlyMandatory = false;
   std::string TempOutput = "";
+  std::vector<std::unordered_map<std::string, std::string>> RowsFeatureValues;
 };
 
 static void
@@ -396,7 +572,7 @@ calculateModuleInfoCount(ProteanCollectFeatures &ACF,
 //          FeatureIdx -> Group, Group -> FeatureIdx
 //          FeatureIdx -> Calculating function
 #define REGISTER_NAME(INDEX_NAME, NAME)                                        \
-  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME}
+  { ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME }
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
     ProteanCollectFeatures::FeatureIndexToName{
         REGISTER_NAME(SROASavings, "sroa_savings"),
@@ -529,8 +705,10 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
 #undef REGISTER_NAME
 
 #define REGISTER_SCOPE(INDEX_NAME, NAME)                                       \
-  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                           \
-   ProteanCollectFeatures::Scope::NAME}
+  {                                                                            \
+    ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                          \
+        ProteanCollectFeatures::Scope::NAME                                    \
+  }
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
                          ProteanCollectFeatures::Scope>
     ProteanCollectFeatures::FeatureIndexToScope{
@@ -649,8 +827,10 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
 #undef REGISTER_SCOPE
 
 #define REGISTER_GROUP(INDEX_NAME, NAME)                                       \
-  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                           \
-   ProteanCollectFeatures::GroupID::NAME}
+  {                                                                            \
+    ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                          \
+        ProteanCollectFeatures::GroupID::NAME                                  \
+  }
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
                          ProteanCollectFeatures::GroupID>
     ProteanCollectFeatures::FeatureIndexToGroup{
@@ -805,7 +985,7 @@ const std::multimap<ProteanCollectFeatures::Scope,
                    ProteanCollectFeatures::FeatureIndex>(FeatureIndexToScope)};
 
 #define REGISTER_FUNCTION(INDEX_NAME, NAME)                                    \
-  {ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME}
+  { ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME }
 const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
                          ProteanCollectFeatures::CalculateFeatureFunction>
     ProteanCollectFeatures::CalculateFeatureMap{
@@ -2791,6 +2971,7 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
     }
   }
   MDC.formatOutput();
+  MDC.addModuleFlags(&M);
   MDC.printOutput();
   return PreservedAnalyses::all();
 }

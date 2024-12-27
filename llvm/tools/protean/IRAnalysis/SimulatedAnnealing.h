@@ -20,6 +20,7 @@
 #include <memory>
 #include <random>
 #include <unordered_map>
+#include <mutex>
 
 enum IRCostFunction { FileSize, InstCount, IRAnalysis, MCA };
 
@@ -86,6 +87,7 @@ public:
   unsigned int MaxIterations;
   bool ProteanOutputTable;
   bool UseProteanCollect;
+  bool ModLevelIPC;
   bool UseAOTModel;
   unsigned int InitialSampleSize;
   double MutationRate;
@@ -98,16 +100,14 @@ public:
   std::set<std::string> AllRecipesSet;
   std::vector<std::string> AllRecipes;
   std::default_random_engine RandomEngine;
-  SimulatedAnnealingProtean(int RngVal, CoolingType CoolingSchedule,
-                            double MaxTemperature, double MinTemperature,
-                            unsigned int MaxIterations, IRCostFunction CostType,
-                            std::string OutputFileName,
-                            bool ProteanOutputTableGen,
-                            bool UseProteanCollectFeatures, bool UseAOT,
-                            unsigned int SampleSize, double MutationRate,
-                            double CrossoverRate, unsigned int PopulationSize,
-                            CrossoverFunction CrossoverType,
-                            MutationFunction MutationType);
+  SimulatedAnnealingProtean(
+      int RngVal, CoolingType CoolingSchedule, double MaxTemperature,
+      double MinTemperature, unsigned int MaxIterations,
+      IRCostFunction CostType, std::string OutputFileName,
+      bool ProteanOutputTableGen, bool UseProteanCollectFeatures,
+      bool ModLevelIPC, bool UseAOT, unsigned int SampleSize,
+      double MutationRate, double CrossoverRate, unsigned int PopulationSize,
+      CrossoverFunction CrossoverType, MutationFunction MutationType);
 
   using State = PhaseOrderGeneratorBase::Recipes;
   void run() override;

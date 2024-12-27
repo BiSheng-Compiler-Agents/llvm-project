@@ -29,6 +29,12 @@ llvm_canonicalize_cmake_booleans(
   LLVM_HAS_LOGF128
   )
 
+if(NOT DEFINED ACPO_AOT)
+  set(ACPO_AOT 0)
+endif()
+set(ACPO_AOT ${ACPO_AOT})
+llvm_canonicalize_cmake_booleans(ACPO_AOT)
+
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
@@ -254,4 +260,6 @@ add_lit_testsuites(LLVM ${CMAKE_CURRENT_SOURCE_DIR}
 # Setup an alias for 'check-all'.
 add_custom_target(check)
 add_dependencies(check check-all)
-set_target_properties(check PROPERTIES FOLDER "LLVM/Tests")
+set_target_properties(check PROPERTIES FOLDER "Tests")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in")
