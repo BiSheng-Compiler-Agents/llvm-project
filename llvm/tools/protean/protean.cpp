@@ -371,7 +371,12 @@ static cl::opt<bool> ProteanOutputTable(
 static cl::opt<bool>
     UseProteanCollect("use-protean-collect",
                       cl::desc("Use protean collect features for IR Analyzer"),
-                      cl::init(false));
+                      cl::init(true));
+
+static cl::opt<bool>
+    ModLevelIPC("module-level-ipc",
+                cl::desc("Enable IPC for module level shared memory"),
+                cl::init(true));
 
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
@@ -662,7 +667,8 @@ int main(int argc, char **argv) {
                 "the --disable-output option is used.\n";
   } else {
     // Default to standard output.
-    if (OutputFilename.empty())
+    if (OutputFilename.empty() ||
+        OutputFilename.find_last_of(".") == std::string::npos)
       OutputFilename = "-";
 
     std::error_code EC;
@@ -788,16 +794,17 @@ int main(int argc, char **argv) {
              << "\n";
       std::string Recipes;
       if (OutputFilename == "-") {
-        errs() << "Specify an output file with -o to activate Simulated "
-                  "Annealing\n";
+        errs() << "Specify an output.o file with -o (e.g., -o output.bc) to "
+                  "activate Simulated Annealing\n";
         return 1;
       }
 
       SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
           RngVal, CoolingSchedule, MaxTemperature, MinTemperature,
           MaxIterations, CostType, OutputFilename, ProteanOutputTable,
-          UseProteanCollect, UseAOTModel, InitialSampleSize, MutationRate,
-          CrossoverRate, PopulationSize, CrossoverType, MutationType);
+          UseProteanCollect, ModLevelIPC, UseAOTModel, InitialSampleSize,
+          MutationRate, CrossoverRate, PopulationSize, CrossoverType,
+          MutationType);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       if (ProteanOutputTable) {
         std::stringstream ss;

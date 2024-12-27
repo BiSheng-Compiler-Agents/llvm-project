@@ -381,3 +381,21 @@ PhaseOrderGeneratorBase::generateRecipe(std::vector<std::string> &AllRecipes,
   }
   return convert(Rs);
 }
+
+PhaseOrderGeneratorBase::Recipes
+PhaseOrderGeneratorBase::generateRecipe(std::string Recipe) {
+  if (Recipe.length() != 5) {
+    llvm::errs() << "Recipe length incorrect\n";
+    return {};
+  }
+  std::vector<int> Rs;
+  for (auto I : Recipe) {
+    if (I != '0' && I != '1' && I != '2' && I != '3' && I != '4') {
+      llvm::errs() << "Invalid recipe character: " << I << "\n";
+      return {};
+    }
+    // Convert character to integer
+    Rs.push_back(std::stoi(std::string(1, I)));
+  }
+  return convert(Rs);
+}

@@ -453,6 +453,9 @@ public:
   // but in others, additional steps that require feedback may be needed.
   virtual bool closeMLInterface() override;
 
+  // Get the size of the model features, in bytes.
+  size_t getModelFeaturesSize(std::string ModelSpecFile);
+
 private:
   uint64_t NextID;
 
