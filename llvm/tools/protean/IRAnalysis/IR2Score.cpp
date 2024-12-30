@@ -79,9 +79,6 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   bool ModelRunOK = MLIF->runModel("IR2SCORE");
   assert(ModelRunOK);
   float IRScore = MLIF->getModelResultF("IRSCORE");
-  if (UseAOTModel) {
-    IRScore = IRScore * (YScaling[0] - YScaling[1]) + YScaling[1];
-  }
   LLVM_DEBUG(llvm::dbgs() << "Found IRScore: " << IRScore << '\n');
   assert(getContextPtr() != nullptr);
   Score->addField(
