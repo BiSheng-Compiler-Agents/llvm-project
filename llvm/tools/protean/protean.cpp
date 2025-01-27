@@ -900,7 +900,10 @@ int main(int argc, char **argv) {
       if (!Recipes.empty())
         Pipeline += ",";
       Pipeline += Recipes;
-      Pipeline += ",loop-collect-features";
+      if (UseProteanCollect) {
+        Pipeline += ",protean-collect-features";
+        LLVM_DEBUG(dbgs() << "ProteanCollectFeature Pass is enabled! " << "\n");
+      }
       LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
     }
 

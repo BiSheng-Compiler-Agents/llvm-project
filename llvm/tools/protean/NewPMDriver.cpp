@@ -510,11 +510,10 @@ bool llvm::runPassPipeline(
   MPM.addPass(CollectFeaturesPass());
   FunctionPassManager FPM;
   LoopPassManager LPM;
-  LPM.addPass(LoopCollectFeaturesPass());
-
   FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
   MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM),
                                                 PTO.EagerlyInvalidateAnalyses));
+
   // Before executing passes, print the final values of the LLVM options.
   cl::PrintOptionValues();
 
