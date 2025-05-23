@@ -44,6 +44,8 @@ public:
   void
   addFeatures(std::vector<std::pair<std::string, std::string>> NewFeatures);
 
+  void setOutput(std::string Output) { Out << Output; }
+
   // Print out the features
   void printRow(bool printHeader = false);
 

@@ -1,4 +1,7 @@
 add_llvm_component_library(LLVMInstrumentation
+  ACPOAI4CFHModel.cpp 
+  ACPOAI4CMEMOPModel.cpp 
+  AI4CAnalysis.cpp
   AddressSanitizer.cpp
   BoundsChecking.cpp
   CGProfile.cpp

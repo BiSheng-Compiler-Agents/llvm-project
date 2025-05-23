@@ -20,6 +20,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
+#include "llvm/Analysis/ModelDataCollector.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/BasicBlock.h"
@@ -39,9 +40,13 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Process.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Instrumentation/PGOInstrumentation.h"
+#include "llvm/Transforms/Instrumentation/ACPOAI4CMEMOPModel.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <cassert>
 #include <cstdint>
@@ -92,6 +97,135 @@ cl::opt<bool>
 static cl::opt<unsigned>
     MemOpMaxOptSize("memop-value-prof-max-opt-size", cl::Hidden, cl::init(128),
                     cl::desc("Optimize the memop size <= this value"));
+
+cl::opt<bool>
+    EnableAI4CMEMOP("enable-ai4c-memop", cl::init(false), cl::Hidden,
+                    cl::desc("Leverage AOT ML model to optimize memop."));
+
+static cl::opt<std::string>
+    MemOPDumpFile("memop-dump-file", cl::init("-"), cl::Hidden,
+                  cl::desc("Name of a file to store memop data in."));
+
+namespace {
+class ModelDataAI4CMemOPCollector : public ModelDataCollector {
+public:
+  ModelDataAI4CMemOPCollector(formatted_raw_ostream &OS,
+                              std::string OutputFileName,
+                              FunctionAnalysisManager *FAM)
+      : ModelDataCollector(OS, OutputFileName), FAM(FAM) {}
+  void collectFeatures(Function *F, Instruction *I, const char *op_name) {
+    // Now MemOPSizeOpt could only optimize memcpy and bcmp
+    int8_t type = op_name == "memcpy" ? 1 : op_name == "bcmp" ? 2 : 0;
+    resetRegisteredFeatures();
+    Module *GlobalM = F->getParent();
+    ACPOCollectFeatures::FeatureInfo GlobalFeatureInfo{
+        ACPOCollectFeatures::FeatureIndex::NumOfFeatures,
+        {FAM, nullptr},
+        {F, nullptr, I->getParent(), GlobalM, nullptr}};
+
+    registerFeature({ACPOCollectFeatures::Scope::Function}, GlobalFeatureInfo);
+    registerFeature({ACPOCollectFeatures::Scope::BasicBlock},
+                    GlobalFeatureInfo);
+    ModelDataCollector::collectFeatures();
+
+    // Insert Memop type
+    Features.push_back(std::make_pair<std::string, std::string>(
+        "memop_type", std::to_string(type)));
+
+    int8_t dst_align = 0, dst_from = 0, src_align = 0, src_from = 0;
+    // Insert Memop Align info of Dst and Src
+    if (type == 1) {
+      // For ptr param of memcpy
+      dst_align =
+          dyn_cast<MemIntrinsic>(I)->getDestAlign().valueOrOne().value();
+      dst_from = getPtrType(dyn_cast<MemIntrinsic>(I)->getArgOperand(0));
+      src_align =
+          dyn_cast<MemCpyInst>(I)->getSourceAlign().valueOrOne().value();
+      src_from = getPtrType(dyn_cast<MemIntrinsic>(I)->getArgOperand(1));
+    } else if (type == 2) {
+      // For ptr param of bcmp
+      auto *DstPtr = dyn_cast<CallInst>(I)->getArgOperand(0);
+      auto *SrcPtr = dyn_cast<CallInst>(I)->getArgOperand(1);
+      dst_from = getPtrType(DstPtr);
+      src_from = getPtrType(SrcPtr);
+    }
+    Features.push_back(std::make_pair<std::string, std::string>(
+        "dst_align", std::to_string(dst_align)));
+
+    Features.push_back(std::make_pair<std::string, std::string>(
+        "dst_from", std::to_string(dst_from)));
+
+    Features.push_back(std::make_pair<std::string, std::string>(
+        "src_align", std::to_string(src_align)));
+
+    Features.push_back(std::make_pair<std::string, std::string>(
+        "src_from", std::to_string(src_from)));
+  }
+
+  // Set how the Dst/Src ptr is from as a feature
+  // 1: Alloca
+  // 2: From call malloc intrinsic
+  // 3: Other function's return
+  // 4: From load
+  // 5: Global variable
+  // 0: Other ways
+  uint16_t getPtrType(Value *Ptr) {
+    if (dyn_cast<AllocaInst>(Ptr)) {
+      return 1;
+    } else if (dyn_cast<CallInst>(Ptr)) {
+      if (dyn_cast<CallInst>(Ptr)->getCalledFunction() &&
+          dyn_cast<CallInst>(Ptr)->getCalledFunction()->getName().startswith(
+              "malloc")) {
+        return 2;
+      } else {
+        return 3;
+      }
+    } else if (dyn_cast<LoadInst>(Ptr)) {
+      return 4;
+    } else if (dyn_cast<GlobalVariable>(Ptr)) {
+      return 5;
+    } else {
+      return 0;
+    }
+  }
+
+public:
+  FunctionAnalysisManager *FAM;
+};
+} // namespace
+
+SmallVector<uint64_t, 16> getACPOAdvice(Function *F,
+                                        ModelDataAI4CMemOPCollector *MDC) {
+  SmallVector<uint64_t, 16> SizeIds;
+  int64_t OPT = 0;
+  auto &ORE = MDC->FAM->getResult<OptimizationRemarkEmitterAnalysis>(*F);
+  std::unique_ptr<ACPOAI4CMEMOPModel> AI4CMEMOP =
+      std::make_unique<ACPOAI4CMEMOPModel>(&(F->getContext()), &ORE);
+  std::vector<std::pair<std::string, std::string>> Features =
+      MDC->getFeatures();
+
+  std::vector<int> PossibleSizes = {0, 1,  2,  3,  4,  5,  6,   7,   8,
+                                    9, 16, 17, 32, 33, 65, 129, 257, 513};
+
+  for (int psize : PossibleSizes) {
+    if (psize == 0)
+      continue;
+    Features.push_back(std::make_pair<std::string, std::string>(
+        "opt_size", std::to_string(psize)));
+    AI4CMEMOP->setMLCustomFeatures(Features);
+    std::unique_ptr<ACPOAdvice> Advice = AI4CMEMOP->getAdvice();
+    Constant *Val = Advice->getField("OPT");
+    assert(Val != nullptr);
+    assert(isa<ConstantInt>(Val));
+    ConstantInt *OPTPtr = dyn_cast<ConstantInt>(Val);
+    OPT = OPTPtr->getSExtValue();
+    if (OPT)
+      SizeIds.push_back(psize);
+    Features.pop_back();
+  }
+
+  return SizeIds;
+}
 
 namespace {
 
@@ -176,8 +310,9 @@ class MemOPSizeOpt : public InstVisitor<MemOPSizeOpt> {
 public:
   MemOPSizeOpt(Function &Func, BlockFrequencyInfo &BFI,
                OptimizationRemarkEmitter &ORE, DominatorTree *DT,
-               TargetLibraryInfo &TLI)
-      : Func(Func), BFI(BFI), ORE(ORE), DT(DT), TLI(TLI), Changed(false) {
+               TargetLibraryInfo &TLI, ModelDataAI4CMemOPCollector &MDC)
+      : Func(Func), BFI(BFI), ORE(ORE), DT(DT), TLI(TLI), MDC(MDC),
+        Changed(false) {
     ValueDataArray =
         std::make_unique<InstrProfValueData[]>(INSTR_PROF_NUM_BUCKETS);
   }
@@ -225,6 +360,8 @@ private:
   // The space to read the profile annotation.
   std::unique_ptr<InstrProfValueData[]> ValueDataArray;
   bool perform(MemOp MO);
+  std::vector<std::vector<std::string>> Records;
+  ModelDataAI4CMemOPCollector &MDC;
 };
 
 static bool isProfitable(uint64_t Count, uint64_t TotalCount) {
@@ -254,103 +391,119 @@ bool MemOPSizeOpt::perform(MemOp MO) {
 
   uint32_t NumVals, MaxNumVals = INSTR_PROF_NUM_BUCKETS;
   uint64_t TotalCount;
-  if (!getValueProfDataFromInst(*MO.I, IPVK_MemOPSize, MaxNumVals,
-                                ValueDataArray.get(), NumVals, TotalCount))
-    return false;
-
-  uint64_t ActualCount = TotalCount;
-  uint64_t SavedTotalCount = TotalCount;
-  if (MemOPScaleCount) {
-    auto BBEdgeCount = BFI.getBlockProfileCount(MO.I->getParent());
-    if (!BBEdgeCount)
-      return false;
-    ActualCount = *BBEdgeCount;
-  }
-
-  ArrayRef<InstrProfValueData> VDs(ValueDataArray.get(), NumVals);
-  LLVM_DEBUG(dbgs() << "Read one memory intrinsic profile with count "
-                    << ActualCount << "\n");
-  LLVM_DEBUG(
-      for (auto &VD
-           : VDs) { dbgs() << "  (" << VD.Value << "," << VD.Count << ")\n"; });
-
-  if (ActualCount < MemOPCountThreshold)
-    return false;
-  // Skip if the total value profiled count is 0, in which case we can't
-  // scale up the counts properly (and there is no profitable transformation).
-  if (TotalCount == 0)
-    return false;
-
-  TotalCount = ActualCount;
-  if (MemOPScaleCount)
-    LLVM_DEBUG(dbgs() << "Scale counts: numerator = " << ActualCount
-                      << " denominator = " << SavedTotalCount << "\n");
-
-  // Keeping track of the count of the default case:
-  uint64_t RemainCount = TotalCount;
-  uint64_t SavedRemainCount = SavedTotalCount;
+  uint64_t ActualCount;
+  uint64_t SavedTotalCount;
+  uint64_t RemainCount;
+  uint64_t SavedRemainCount;
   SmallVector<uint64_t, 16> SizeIds;
   SmallVector<uint64_t, 16> CaseCounts;
   SmallDenseSet<uint64_t, 16> SeenSizeId;
   uint64_t MaxCount = 0;
   unsigned Version = 0;
-  // Default case is in the front -- save the slot here.
-  CaseCounts.push_back(0);
   SmallVector<InstrProfValueData, 24> RemainingVDs;
-  for (auto I = VDs.begin(), E = VDs.end(); I != E; ++I) {
-    auto &VD = *I;
-    int64_t V = VD.Value;
-    uint64_t C = VD.Count;
-    if (MemOPScaleCount)
-      C = getScaledCount(C, ActualCount, SavedTotalCount);
-
-    if (!InstrProfIsSingleValRange(V) || V > MemOpMaxOptSize) {
-      RemainingVDs.push_back(VD);
-      continue;
+  uint64_t SumForOpt;
+  const char *op_name = MO.getName(TLI);
+  if (EnableAI4CMEMOP) {
+    MDC.collectFeatures(&Func, MO.I, op_name);
+    SizeIds = getACPOAdvice(MO.I->getFunction(), &MDC);
+    if (!SizeIds.size())
+      return false;
+  } else {
+    if (!getValueProfDataFromInst(*MO.I, IPVK_MemOPSize, MaxNumVals,
+                                  ValueDataArray.get(), NumVals, TotalCount)) {
+      return false;
+    }
+    ActualCount = TotalCount;
+    SavedTotalCount = TotalCount;
+    if (MemOPScaleCount) {
+      auto BBEdgeCount = BFI.getBlockProfileCount(MO.I->getParent());
+      if (!BBEdgeCount) {
+        return false;
+      }
+      ActualCount = *BBEdgeCount;
     }
 
-    // ValueCounts are sorted on the count. Break at the first un-profitable
-    // value.
-    if (!isProfitable(C, RemainCount)) {
-      RemainingVDs.insert(RemainingVDs.end(), I, E);
-      break;
+    ArrayRef<InstrProfValueData> VDs(ValueDataArray.get(), NumVals);
+    LLVM_DEBUG(dbgs() << "Read one memory intrinsic profile with count "
+                      << ActualCount << "\n");
+    LLVM_DEBUG(for (auto &VD
+                    : VDs) {
+      dbgs() << "  (" << VD.Value << "," << VD.Count << ")\n";
+    });
+    if (ActualCount < MemOPCountThreshold) {
+      return false;
     }
-
-    if (!SeenSizeId.insert(V).second) {
-      errs() << "warning: Invalid Profile Data in Function " << Func.getName()
-             << ": Two identical values in MemOp value counts.\n";
+    // Skip if the total value profiled count is 0, in which case we can't
+    // scale up the counts properly (and there is no profitable transformation).
+    if (TotalCount == 0) {
       return false;
     }
 
-    SizeIds.push_back(V);
-    CaseCounts.push_back(C);
-    if (C > MaxCount)
-      MaxCount = C;
+    TotalCount = ActualCount;
+    if (MemOPScaleCount)
+      LLVM_DEBUG(dbgs() << "Scale counts: numerator = " << ActualCount
+                        << " denominator = " << SavedTotalCount << "\n");
 
-    assert(RemainCount >= C);
-    RemainCount -= C;
-    assert(SavedRemainCount >= VD.Count);
-    SavedRemainCount -= VD.Count;
+    // Keeping track of the count of the default case:
+    RemainCount = TotalCount;
+    SavedRemainCount = SavedTotalCount;
+    // Default case is in the front -- save the slot here.
+    CaseCounts.push_back(0);
+    for (auto I = VDs.begin(), E = VDs.end(); I != E; ++I) {
+      auto &VD = *I;
+      int64_t V = VD.Value;
+      uint64_t C = VD.Count;
+      if (MemOPScaleCount)
+        C = getScaledCount(C, ActualCount, SavedTotalCount);
 
-    if (++Version >= MemOPMaxVersion && MemOPMaxVersion != 0) {
-      RemainingVDs.insert(RemainingVDs.end(), I + 1, E);
-      break;
+      if (!InstrProfIsSingleValRange(V) || V > MemOpMaxOptSize) {
+        RemainingVDs.push_back(VD);
+        continue;
+      }
+
+      // ValueCounts are sorted on the count. Break at the first un-profitable
+      // value.
+      if (!isProfitable(C, RemainCount)) {
+        RemainingVDs.insert(RemainingVDs.end(), I, E);
+        break;
+      }
+
+      if (!SeenSizeId.insert(V).second) {
+        errs() << "warning: Invalid Profile Data in Function " << Func.getName()
+               << ": Two identical values in MemOp value counts.\n";
+        return false;
+      }
+
+      SizeIds.push_back(V);
+      CaseCounts.push_back(C);
+      if (C > MaxCount)
+        MaxCount = C;
+
+      assert(RemainCount >= C);
+      RemainCount -= C;
+      assert(SavedRemainCount >= VD.Count);
+      SavedRemainCount -= VD.Count;
+
+      if (++Version >= MemOPMaxVersion && MemOPMaxVersion != 0) {
+        RemainingVDs.insert(RemainingVDs.end(), I + 1, E);
+        break;
+      }
     }
+
+    if (Version == 0) {
+      return false;
+    }
+
+    CaseCounts[0] = RemainCount;
+    if (RemainCount > MaxCount)
+      MaxCount = RemainCount;
+
+    SumForOpt = TotalCount - RemainCount;
+    LLVM_DEBUG(dbgs() << "Optimize one memory intrinsic call to " << Version
+                      << " Versions (covering " << SumForOpt << " out of "
+                      << TotalCount << ")\n");
   }
-
-  if (Version == 0)
-    return false;
-
-  CaseCounts[0] = RemainCount;
-  if (RemainCount > MaxCount)
-    MaxCount = RemainCount;
-
-  uint64_t SumForOpt = TotalCount - RemainCount;
-
-  LLVM_DEBUG(dbgs() << "Optimize one memory intrinsic call to " << Version
-                    << " Versions (covering " << SumForOpt << " out of "
-                    << TotalCount << ")\n");
-
+  
   // mem_op(..., size)
   // ==>
   // switch (size) {
@@ -458,13 +611,14 @@ bool MemOPSizeOpt::perform(MemOp MO) {
 
 static bool PGOMemOPSizeOptImpl(Function &F, BlockFrequencyInfo &BFI,
                                 OptimizationRemarkEmitter &ORE,
-                                DominatorTree *DT, TargetLibraryInfo &TLI) {
+                                DominatorTree *DT, TargetLibraryInfo &TLI,
+                                ModelDataAI4CMemOPCollector &MDC) {
   if (DisableMemOPOPT)
     return false;
 
   if (F.hasFnAttribute(Attribute::OptimizeForSize))
     return false;
-  MemOPSizeOpt MemOPSizeOpt(F, BFI, ORE, DT, TLI);
+  MemOPSizeOpt MemOPSizeOpt(F, BFI, ORE, DT, TLI, MDC);
   MemOPSizeOpt.perform();
   return MemOPSizeOpt.isChanged();
 }
@@ -475,7 +629,12 @@ PreservedAnalyses PGOMemOPSizeOpt::run(Function &F,
   auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
   auto *DT = FAM.getCachedResult<DominatorTreeAnalysis>(F);
   auto &TLI = FAM.getResult<TargetLibraryAnalysis>(F);
-  bool Changed = PGOMemOPSizeOptImpl(F, BFI, ORE, DT, TLI);
+  std::error_code EC;
+  raw_fd_ostream RawOS(MemOPDumpFile.getValue(), EC, sys::fs::CD_OpenAlways,
+                       sys::fs::FA_Write, sys::fs::OF_Append);
+  formatted_raw_ostream OS(RawOS);
+  ModelDataAI4CMemOPCollector MDC(OS, MemOPDumpFile, &FAM);
+  bool Changed = PGOMemOPSizeOptImpl(F, BFI, ORE, DT, TLI, MDC);
   if (!Changed)
     return PreservedAnalyses::all();
   auto PA = PreservedAnalyses();

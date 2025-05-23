@@ -38,9 +38,12 @@ public:
   enum class Scope {
     Module,
     Function,
+    BasicBlock,
+    Edge,
     Loop,
     Callgraph,
     CallSite,
+    MemOpt,
     NumOfScope,
   };
 
@@ -56,6 +59,9 @@ public:
     HotColdCallSite,
     InlineCostFeatureGroup,
     ACPOFIExtendedFeatures,
+    BasicBlockFeatures,
+    EdgeFeatures,
+    MemOptFeatures,
     NumOfGroupID
   };
 
@@ -147,6 +153,45 @@ public:
     ACPOFIExtendedFeaturesFloatFeatureEnd,
     // End: ACPOFIExtendedFeatures
 
+    // Begin: BasicBlockFeatures
+    NumSuccessors,
+    NumInstrs,
+    NumCriticalEdges,
+    HighestNumInstrsInSucc,
+    SuccNumWithHighestNumInstrs,
+    IsBranchInst,
+    IsSwitchInst,
+    IsIndirectBrInst,
+    IsInvokeInst,
+    IsCallBrInst,
+    IsFirstOpPtr,
+    IsSecondOpNull,
+    IsSecondOpConstant,
+    IsEqCmp,
+    IsNeCmp,
+    IsGtCmp,
+    IsLtCmp,
+    IsGeCmp,
+    IsLeCmp,
+    IsIVCmp ,
+    IsBBInLoop ,
+    IsFirstSuccInLoop ,
+    IsSecondSuccInLoop,
+    // BBName,
+    // End: BasicBlockFeatures
+
+    // Begin: EdgeFeatures
+    DestNumSuccessors,
+    DestNumInstrs ,
+    DestNumCriticalEdges ,
+    DestIsBranchInst ,
+    DestIsSwitchInst ,
+    DestIsIndirectBrInst ,
+    DestIsInvokeInst ,
+    DestIsCallBrInst ,
+    DestSuccNumber ,
+    // End: EdgeFeatures
+
     CallerBlockFreq,
     CallSiteHeight,
     ConstantParam,
@@ -159,6 +204,20 @@ public:
     IsInInnerLoop,
     IsMustTailCall,
     IsTailCall,
+
+    // Begin: MemOptFeatures
+    NumInst,
+    NumPhis,
+    NumCalls,
+    NumLoads,
+    NumStores,
+    NumPreds,
+    NumSuccs,
+    EndsWithUnreachable,
+    EndsWithReturn,
+    EndsWithCondBranch,
+    EndsWithBranch,
+    // End: MemOptFeatures
     NumOfFeatures
   };
 
@@ -175,6 +234,7 @@ public:
     BasicBlock *BB = nullptr;
     Module *M = nullptr;
     Loop *L = nullptr;
+    BasicBlock *DestBB = nullptr;
     // Can add Instructions or other types later.
   };
 
