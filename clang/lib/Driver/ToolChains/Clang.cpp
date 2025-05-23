@@ -5871,6 +5871,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                   options::OPT_finstrument_functions_after_inlining,
                   options::OPT_finstrument_function_entry_bare);
 
+  if (Args.hasArg(options::OPT_fai4c_analysis)) CmdArgs.push_back("-fai4c-analysis");
+  
+  if (Args.hasArg(options::OPT_fai4c_recipe)) {
+    CmdArgs.push_back("-fai4c-recipe");
+  }
+
   // NVPTX/AMDGCN doesn't support PGO or coverage. There's no runtime support
   // for sampling, overhead of call arc collection is way too high and there's
   // no way to collect the output.

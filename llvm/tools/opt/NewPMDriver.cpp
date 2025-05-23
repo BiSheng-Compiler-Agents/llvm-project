@@ -72,6 +72,13 @@ cl::opt<std::string>
 
 enum class DebugLogging { None, Normal, Verbose, Quiet };
 
+cl::opt<bool> ACPORecipe(
+    "use-acpo-pass_recipe",
+    cl::desc("Enable textual description of the ACPO phase ordering-recipes "
+             "inserted as PassPipeline with the new PM "),
+    cl::init(false)
+);
+
 static cl::opt<DebugLogging> DebugPM(
     "debug-pass-manager", cl::Hidden, cl::ValueOptional,
     cl::desc("Print pass management debugging information"),

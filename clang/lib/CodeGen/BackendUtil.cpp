@@ -39,6 +39,7 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/OffloadBinary.h"
+#include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
@@ -46,6 +47,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -79,8 +81,10 @@
 #include "llvm/Transforms/Utils/Debugify.h"
 #include "llvm/Transforms/Utils/EntryExitInstrumenter.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include <fstream>
 #include <memory>
 #include <optional>
+#include <tuple>
 using namespace clang;
 using namespace llvm;
 
@@ -841,6 +845,10 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   PTO.CallGraphProfile = !CodeGenOpts.DisableIntegratedAS;
   PTO.UnifiedLTO = CodeGenOpts.UnifiedLTO;
 
+  PTO.AI4CAnalysis = CodeGenOpts.AI4CAnalysis;
+  PTO.AI4CRecipe = CodeGenOpts.AI4CRecipe;
+  PTO.AI4CRecipeVerbose = CodeGenOpts.AI4CRecipeVerbose;
+
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
   CGSCCAnalysisManager CGAM;
@@ -1035,10 +1043,78 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
 
         if (auto Err = PB.parsePassPipeline(MPM, PassPipeline))
           errs() << "AutoTuner: cannot add pass:" << toString(std::move(Err))
-                 << "\n";
+                 << '\n';
       }
     }
-    if (!Changed) {
+
+    // Use pass order define by ACPO recipe library instead (w/ clang frontend clang -O3 -fai4c-recipe)
+    // 1. Clang arguments passed before are intact in the compilation pipeline.
+    // 2. <Optional> If necessary, Using opt, supplimentary passes should be added with -passes="PASSES".
+    // 3. Optimization levels should be set at non -O0 when compiling with clang, e.g.:
+    // "clang -O3 <Other front end passes> -mllvm -use-acpo-bw-model -f"
+    if (PTO.AI4CRecipe) {
+      if (PTO.AI4CRecipeVerbose) {
+        errs() << "AI4C: Module: " << TheModule->getName() << " - ACPO Phase-ordering recipes are activated: 724-DADCB\n";
+        errs() << "AI4C: Optimization is set at " << Level.getSpeedupLevel() << '\n';
+      }
+      std::string ACPORecipeModelDir;
+      std::string PassPipeline = "";
+      std::string ACPOPipeline = "";
+
+      if (std::optional<std::string> Path = llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR")) {
+        ACPORecipeModelDir = *Path;
+      } else {
+        ACPORecipeModelDir = *Path;
+      }
+
+      std::string FileName = ACPORecipeModelDir + "/model-recipe.acpo";
+      if (PTO.AI4CRecipeVerbose) {
+        errs() << "AI4C-Recipe : Reading custom recipe from " << FileName << '\n';
+      }
+      std::ifstream file(FileName);
+      if (file.is_open()) {
+        // For now, we only support the custom recipe at the 1st line.
+        // This can be later be expanded into an (APP A, Line X) pair.
+        std::string line = "";
+        if (std::getline(file, line)) {
+          ACPOPipeline = line;
+        }
+        file.close();
+      } else {
+        if (PTO.AI4CRecipeVerbose) {
+          errs() << "Could not open recipe file, reading hardcoded recipes instead:\n";
+        }
+        ACPOPipeline = "annotation2metadata,forceattrs,inferattrs,coro-early,cgscc(dse,function<eager-inv>(loop-simplify,lcssa,coro-elide,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1000;no-use-loop-info>,reassociate),function-attrs,function(require<should-not-run-function-passes>),coro-split,function(invalidate<all>)),deadargelim,coro-cleanup,globalopt,globaldce,elim-avail-extern,rpo-function-attrs,recompute-globalsaa,ipsccp,function<eager-inv>(float2int,lower-constant-intrinsics),constmerge,cg-profile,rel-lookup-table-converter,ir-library-injection,globalopt,cgscc(devirt<4>(inline<only-mandatory>,inline,move-auto-init,argpromotion,openmp-opt-cgscc,function<eager-inv;no-rerun>(sroa<modify-cfg>,speculative-execution,tailcallelim,loop-mssa(licm<allowspeculation>,simple-loop-unswitch<nontrivial;trivial>),loop(loop-idiom,indvars,loop-deletion),loop-unroll<O3>,early-cse<>,callsite-splitting,sroa<modify-cfg>,early-cse<memssa>,speculative-execution,jump-threading,correlated-propagation,lower-expect,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1000;no-use-loop-info>,aggressive-instcombine,libcalls-shrinkwrap,tailcallelim,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,reassociate))),cgscc(dse,function<eager-inv>(loop-simplify,lcssa,coro-elide,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1000;no-use-loop-info>,reassociate),function-attrs,function(require<should-not-run-function-passes>),coro-split,function(invalidate<all>)),deadargelim,coro-cleanup,globalopt,globaldce,elim-avail-extern,rpo-function-attrs,recompute-globalsaa,ipsccp,function<eager-inv>(float2int,lower-constant-intrinsics),constmerge,cg-profile,rel-lookup-table-converter,ir-library-injection,function<eager-inv>(sroa<modify-cfg>,gvn-hoist,mldst-motion,gvn,sccp,bdce,instcombine<max-iterations=1000;no-use-loop-info>,jump-threading,correlated-propagation,adce,memcpyopt),function<eager-inv>(loop-simplify,lcssa,crypto,chr,loop(loop-rotate<header-duplication;no-prepare-for-lto>,loop-deletion),annotation-remarks,constraint-elimination,mem2reg,instcombine<max-iterations=1000;no-use-loop-info>,loop-simplify,lcssa,indvars,loop-deletion,loop-simplify,lcssa,loop-instsimplify,loop-simplifycfg,function(loop-mssa(licm<allowspeculation>)),simple-loop-unswitch,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1000;no-use-loop-info>),require<globals-aa>,function(invalidate<aa>),require<profile-summary>,function<eager-inv>(loop-simplify,lcssa,loop(loop-idiom,loop-deletion,loop-unroll-full),loop-data-prefetch,hash-data-prefetch,separate-const-offset-from-gep),verify";
+      }
+      if (IsThinLTO || IsLTO) {
+        // This pass removes available external global defs from the module
+        // turning them into declerations, so we remove it from the pipeline in LTO
+        std::string RemovePass = ",elim-avail-extern";
+        size_t Pos = ACPOPipeline.find(RemovePass);
+        int Counter = 0;
+        while (Pos != std::string::npos) {
+          Counter++;
+          if (PTO.AI4CRecipeVerbose) {
+            errs() << "AI4C: removed " << Counter << " elim-avail-exterm instances.\n";
+          }
+          ACPOPipeline.erase(Pos, RemovePass.length());
+          Pos = ACPOPipeline.find(RemovePass, Pos);
+        }
+      }
+      PassPipeline = ACPOPipeline;
+      if (PTO.AI4CRecipeVerbose) {
+        errs() << "AI4C final passpipeline: " << PassPipeline << "\n";
+      }
+
+      if (auto Err = PB.parsePassPipeline(MPM, PassPipeline))
+        errs() << "ACPO Pass Ordering Recipe: cannot add pass:" << toString(std::move(Err)) << '\n';
+      
+      if (IsThinLTO || IsLTO) {
+        MPM.addPass(PB.addAutoTunerLTOPreLinkPasses());
+      }
+    }
+
+    if (!Changed && !PTO.AI4CRecipe) {
 #endif
     if (IsThinLTO || (IsLTO && CodeGenOpts.UnifiedLTO)) {
       MPM = PB.buildThinLTOPreLinkDefaultPipeline(Level);

@@ -62,6 +62,7 @@ using namespace opt_tool;
 
 static codegen::RegisterCodeGenFlags CFG;
 
+extern cl::opt<bool> ACPORecipe;
 // The OptimizationList is automatically populated with registered Passes by the
 // PassNameParser.
 static cl::list<const PassInfo *, bool, PassNameParser> PassList(cl::desc(
@@ -720,6 +721,24 @@ int main(int argc, char **argv) {
       OK = OutputAssembly
                ? OK_OutputAssembly
                : (OutputThinLTOBC ? OK_OutputThinLTOBitcode : OK_OutputBitcode);
+
+        // Use pass ordering defined by ACPO instead (clang frontend part)
+    // 1. Clang passes with -fPASS should be intact in the compilation pipeline.
+    // 2. <Optional> If necessary, Using opt, needed passes shuould be added with -passes="PASS".
+    // 3. Optimization level should be set at O3 when compiling with clang, e.g.:
+    // clang -O3 <Other front ened passes> -mllvm -use-acpo-bw-model -fai4c-recipe
+
+    if (ACPORecipe) {
+      errs() << "ACPO Phase-ordering recipes are activate: 724-DADCB\n";
+      if (!OptLevelO3) {
+        errs() << "Add -O3 to the compilation so it sets the parameters of the passes correctly.\n";
+        return 1;
+      }
+      std::string ACPOPipeline = "";
+
+      errs() << "Additional passes are added to the pipeline: " << PassPipeline << '\n';
+      Pipeline = PassPipeline + ',' + ACPOPipeline;
+    }
 
     VerifierKind VK = VK_VerifyOut;
     if (NoVerify)

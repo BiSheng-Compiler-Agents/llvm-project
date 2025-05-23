@@ -212,7 +212,8 @@ CODEGENOPT(ObjCAvoidHeapifyLocalBlocks, 1, 0)
 VALUE_CODEGENOPT(OptimizationLevel, 2, 0) ///< The -O[0-3] option specified.
 VALUE_CODEGENOPT(OptimizeSize, 2, 0) ///< If -Os (==1) or -Oz (==2) is specified.
 
-CODEGENOPT(AI4CRecipe, 1, 0)
+CODEGENOPT(AI4CRecipe, 1, 0)        // Enable AI4C Phase ordering 
+CODEGENOPT(AI4CRecipeVerbose, 1, 0) // Enable AI4C Phase ordering verbose mode
 
 CODEGENOPT(AtomicProfileUpdate , 1, 0) ///< Set -fprofile-update=atomic
 /// Choose profile instrumenation kind or no instrumentation.

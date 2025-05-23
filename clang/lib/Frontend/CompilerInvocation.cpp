@@ -1618,6 +1618,9 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
     OptimizationLevel = MaxOptLevel;
   }
   Opts.OptimizationLevel = OptimizationLevel;
+  Opts.AI4CRecipe = Args.hasArg(options::OPT_fai4c_recipe);
+  Opts.AI4CRecipeVerbose = Args.hasArg(options::OPT_fai4c_recipe_verbose);
+  Opts.AI4CAnalysis = Args.hasArg(options::OPT_fai4c_analysis);
 
   // The key paths of codegen options defined in Options.td start with
   // "CodeGenOpts.". Let's provide the expected variable name and type.

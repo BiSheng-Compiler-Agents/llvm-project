@@ -92,6 +92,15 @@ public:
   // analyses after various module->function or cgscc->function adaptors in the
   // default pipelines.
   bool EagerlyInvalidateAnalyses;
+
+  // AI4C Option to optimize workloads
+  // 1. AI4CRecipe: Leveraging ACPO Recipe library to derive phase ordering
+  // 2. AI4CAnalysis
+  // 3. AI4CBW:
+  // 4. AI4CAV
+  bool AI4CRecipe = false;
+  bool AI4CRecipeVerbose = false;
+  bool AI4CAnalysis = false;
 };
 
 /// This class provides access to building LLVM's passes.
@@ -291,6 +300,8 @@ public:
   /// This should only be used for non-LTO and LTO pre-link pipelines.
   ModulePassManager buildO0DefaultPipeline(OptimizationLevel Level,
                                            bool LTOPreLink = false);
+
+  ModulePassManager addAutoTunerLTOPreLinkPasses();
 
   /// Build the default `AAManager` with the default alias analysis pipeline
   /// registered.
@@ -632,6 +643,15 @@ private:
                          std::string ProfileRemappingFile,
                          ThinOrFullLTOPhase LTOPhase,
                          IntrusiveRefCntPtr<vfs::FileSystem> FS);
+
+  void addAI4CRelatedPassesForO0(ModulePassManager &MPM);
+
+  void addAI4CRelatedPasses(ModulePassManager &MPM,
+                            OptimizationLevel Level,
+                            ThinOrFullLTOPhase LOTPhase);
+
+  void addACPOBWPasses(ModulePassManager &PMP, OptimizationLevel Level,
+                       ThinOrFullLTOPhase LTOPhase, bool skipPreInline);
 
   // Extension Point callbacks
   SmallVector<std::function<void(FunctionPassManager &, OptimizationLevel)>, 2>
