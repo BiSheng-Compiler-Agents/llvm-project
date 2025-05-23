@@ -212,11 +212,14 @@ CODEGENOPT(ObjCAvoidHeapifyLocalBlocks, 1, 0)
 VALUE_CODEGENOPT(OptimizationLevel, 2, 0) ///< The -O[0-3] option specified.
 VALUE_CODEGENOPT(OptimizeSize, 2, 0) ///< If -Os (==1) or -Oz (==2) is specified.
 
+CODEGENOPT(AI4CRecipe, 1, 0)
+
 CODEGENOPT(AtomicProfileUpdate , 1, 0) ///< Set -fprofile-update=atomic
 /// Choose profile instrumenation kind or no instrumentation.
 ENUM_CODEGENOPT(ProfileInstr, ProfileInstrKind, 2, ProfileNone)
 /// Choose profile kind for PGO use compilation.
 ENUM_CODEGENOPT(ProfileUse, ProfileInstrKind, 2, ProfileNone)
+CODEGENOPT(AI4CAnalysis, 1, 0) ///< Enable AI4C Analysis
 /// Partition functions into N groups and select only functions in group i to be
 /// instrumented. Selected group numbers can be 0 to N-1 inclusive.
 VALUE_CODEGENOPT(ProfileTotalFunctionGroups, 32, 1)

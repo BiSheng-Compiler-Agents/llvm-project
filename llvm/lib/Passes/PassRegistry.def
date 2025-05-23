@@ -48,6 +48,7 @@ MODULE_ALIAS_ANALYSIS("globals-aa", GlobalsAA())
 #ifndef MODULE_PASS
 #define MODULE_PASS(NAME, CREATE_PASS)
 #endif
+MODULE_PASS("ai4c-analysis", AI4CAnalysis())
 MODULE_PASS("always-inline", AlwaysInlinerPass())
 MODULE_PASS("attributor", AttributorPass())
 MODULE_PASS("annotation2metadata", Annotation2MetadataPass())
@@ -135,6 +136,7 @@ MODULE_PASS("sanmd-module", SanitizerBinaryMetadataPass())
 MODULE_PASS("memprof-module", ModuleMemProfilerPass())
 MODULE_PASS("poison-checking", PoisonCheckingPass())
 MODULE_PASS("pseudo-probe-update", PseudoProbeUpdatePass())
+MODULE_PASS("acpo-branch-weight-model", ACPOBranchWeightModelPass());
 #if defined(ENABLE_AUTOTUNER)
 MODULE_PASS("autotuning-compile-module", AutoTuningCompileModulePass())
 #endif

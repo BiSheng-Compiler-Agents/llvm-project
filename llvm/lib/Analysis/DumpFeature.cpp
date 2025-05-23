@@ -48,6 +48,11 @@ static llvm::cl::opt<std::string>
     OutFile("feature-output", llvm::cl::desc("File for outputting features"),
             llvm::cl::init("features.csv"));
 
+namespace llvm {
+  // Defined in ACPOBranchWeightModel.cpp
+  extern cl::opt<bool> EnableACPOBWModel;
+} // namespace llvm
+
 namespace {
 unsigned getMaxInstructionID() {
 #define LAST_OTHER_INST(NR) return NR;
@@ -215,9 +220,12 @@ void ACPOFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
           if (!Callee->isDeclaration()) {
             // Check all the functions that was called and get the max block
             // frequency.
-            uint64_t EntryFreq =
-                FAM->getResult<BlockFrequencyAnalysis>(*Callee)
-                          .getEntryFreq();
+            uint64_t EntryFreq;
+            if (EnableACPOBWModel) {
+              EntryFreq = 0;
+            } else {
+              EntryFreq = FAM->getResult<BlockFrequencyAnalysis>(F).getEntryFreq();
+            }
             MaxCallsiteBlockFreq = std::max(EntryFreq, MaxCallsiteBlockFreq);
           }
 

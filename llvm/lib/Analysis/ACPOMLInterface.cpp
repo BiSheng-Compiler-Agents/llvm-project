@@ -18,6 +18,9 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Instrumentation/AI4CFHModelRunner.h"
+#include "llvm/Transforms/Instrumentation/AI4CMEMOPModelRunner.h"
+#include "llvm/Transforms/Instrumentation/BWModelRunner.h"
 
 #include <ctime>
 #include <fstream>
@@ -250,8 +253,15 @@ bool ACPOMLPythonInterface::loadModel(std::string ModelSpecFile) {
       return false;
     }
   }
+  LLVM_DEBUG(dbgs() << "Tokens size: " << Tokens.size() << "\n");
+  LLVM_DEBUG(dbgs() << "Tokens ");
+  for (auto Token : Tokens)
+    LLVM_DEBUG(dbgs() << Token << " ");
+  LLVM_DEBUG(dbgs() << "\n");
   int OutputStart = 3 + NumFeatures;
+  LLVM_DEBUG(dbgs() << "Token[OutputStart]: " << Tokens[OutputStart] << "\n");
   int NumOutputs = std::stoi(Tokens[OutputStart]);
+  LLVM_DEBUG(dbgs() << "NumOutputs: " << NumOutputs << "\n");
   ModelPtr->setNumOutputs(NumOutputs);
   OutputStart++;
   std::string OutputName;
@@ -1403,6 +1413,37 @@ createFI(std::vector<std::pair<std::string, std::string>> Inputs,
 }
 #endif
 
+#ifdef LLVM_HAVE_TF_AOT_BWCOMPILEDMODEL
+std::unique_ptr<ACPOModelRunner>
+createBW(std::vector<std::pair<std::string, std::string>> Inputs,
+                StringRef Decision) {
+  // Context does not ever seem to be used in the model runner,
+  // so for now just create an empty context object
+  LLVMContext Ctx;
+  return std::make_unique<BWModelRunner>(Ctx, Inputs, Decision);
+}
+#endif
+
+#ifdef LLVM_HAVE_TF_AOT_AI4CFHCOMPILEDMODEL
+std::unique_ptr<ACPOModelRunner>
+createAI4CFH(std::vector<std::pair<std::string, std::string>> Inputs, StringRef Decision) {
+  // Context does not ever seem to be used in the model runner,
+  // so for now just create an empty context object
+  LLVMContext Ctx;
+  return std::make_unique<AI4CFHModelRunner>(Ctx, Inputs, Decision);
+}
+#endif
+
+#ifdef LLVM_HAVE_TF_AOT_AI4CMEMOPCOMPILEDMODEL
+std::unique_ptr<ACPOModelRunner>
+createAI4CMEMOP(std::vector<std::pair<std::string, std::string>> Inputs, StringRef Decision) {
+  // Context does not ever seem to be used in the model runner,
+  // so for now just create an empty context object
+  LLVMContext Ctx;
+  return std::make_unique<AI4CMEMOPModelRunner>(Ctx, Inputs, Decision);
+}
+#endif
+
 // Generate map using ifdefs for now, in the future we could have this
 // automatically populate using macros
 const std::unordered_map<std::string,
@@ -1410,6 +1451,12 @@ const std::unordered_map<std::string,
     ACPOMLCPPInterface::CreateModelRunnerMap = {
 #ifdef LLVM_HAVE_TF_AOT_FICOMPILEDMODEL
         {"FI", createFI},
+#endif
+#ifdef LLVM_HAVE_TF_AOT_AI4CFHCOMPILEDMODEL
+        {"AI4CFH", createAI4CFH},
+#endif
+#ifdef LLVM_HAVE_TF_AOT_AI4CMEMOPCOMPILEDMODEL
+        {"BW", createAI4CMEMOP},
 #endif
 };
 #endif

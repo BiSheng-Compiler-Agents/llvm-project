@@ -265,12 +265,14 @@
 #if defined(ENABLE_AUTOTUNER)
 #include "llvm/Analysis/AutotuningDump.h"
 #include "llvm/Transforms/Scalar/AutoTuningCompile.h"
+#include "llvm/Transforms/Utils/ACPOBranchWeightModel.h"
 #endif
 
 #if defined(ENABLE_ACPO)
 #include "llvm/Analysis/CallHeight.h"
 #include "llvm/Analysis/DumpCallsite.h"
 #include "llvm/Analysis/DumpFeature.h"
+#include "llvm/Transforms/Instrumentation/AI4CAnalysis.h"
 #endif
 
 using namespace llvm;

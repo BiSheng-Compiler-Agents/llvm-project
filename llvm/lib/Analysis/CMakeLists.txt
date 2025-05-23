@@ -28,7 +28,7 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
       )
     endforeach()
   endif()
-  if (DEFINED LLVM_HAVE_TF_AOT)
+  if (DEFINED LLVM_HAVE_TF_AOT AND NOT DEFINED ENABLE_ACPO)
     tf_find_and_compile(
       ${LLVM_INLINER_MODEL_PATH}
       ${LLVM_INLINER_MODEL_CURRENT_URL}
@@ -48,6 +48,7 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
 endif()
 
 add_llvm_component_library(LLVMAnalysis
+  ACPOBWModel.cpp
   ACPOCollectFeatures.cpp
   ACPOFIModel.cpp
   ACPOMLInterface.cpp

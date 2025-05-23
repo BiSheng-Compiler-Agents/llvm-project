@@ -19,11 +19,13 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/DumpFeature.h"
 #include "llvm/Analysis/FunctionPropertiesAnalysis.h"
 #include "llvm/Analysis/InlineAdvisor.h"
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
@@ -68,6 +70,10 @@ calculateInlineCostFeatures(ACPOCollectFeatures &ACF,
                             const ACPOCollectFeatures::FeatureInfo &info);
 static void calculateACPOFIExtendedFeaturesFeatures(
     ACPOCollectFeatures &ACF, const ACPOCollectFeatures::FeatureInfo &info);
+static void calculateBasicBlockFeatures(
+    ACPOCollectFeatures &ACF, const ACPOCollectFeatures::FeatureInfo &info);
+static void calculateEdgeFeatures(
+    ACPOCollectFeatures &ACF, const ACPOCollectFeatures::FeatureInfo &info);
 static void
 calculateIsIndirectCall(ACPOCollectFeatures &ACF,
                         const ACPOCollectFeatures::FeatureInfo &info);
@@ -81,6 +87,10 @@ static void calculateIsTailCall(ACPOCollectFeatures &ACF,
                                 const ACPOCollectFeatures::FeatureInfo &info);
 static void calculateOptCode(ACPOCollectFeatures &ACF,
                              const ACPOCollectFeatures::FeatureInfo &info);
+
+static void
+calculateMemOptFeatures(ACPOCollectFeatures &ACF,
+                        const ACPOCollectFeatures::FeatureInfo &info);
 
 // Register FeatureIdx -> Feature name
 //          FeatureIdx -> Scope, Scope -> FeatureIdx
@@ -158,6 +168,39 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex, std::string>
         REGISTER_NAME(ACPOFIExtendedFeaturesInstrPerLoop, "InstrPerLoop"),
         REGISTER_NAME(ACPOFIExtendedFeaturesBlockWithMultipleSuccecorsPerLoop,
                       "BlockWithMultipleSuccecorsPerLoop"),
+        REGISTER_NAME(NumSuccessors, "num_successors"),
+        REGISTER_NAME(NumInstrs, "num_instrs"),
+        REGISTER_NAME(NumCriticalEdges, "num_critical_deges"),
+        REGISTER_NAME(HighestNumInstrsInSucc, "highest_num_instrs_in_succ"),
+        REGISTER_NAME(SuccNumWithHighestNumInstrs,
+                      "succ_num_with_highest_num_instrs"),
+        REGISTER_NAME(IsBranchInst, "is_branch_inst"),
+        REGISTER_NAME(IsSwitchInst, "is_switch_inst"),
+        REGISTER_NAME(IsIndirectBrInst, "is_indirect_br_inst"),
+        REGISTER_NAME(IsInvokeInst, "is_invoke_inst"),
+        REGISTER_NAME(IsCallBrInst, "iscall_br_inst"),
+        REGISTER_NAME(IsFirstOpPtr, "is_first_op_ptr"),
+        REGISTER_NAME(IsSecondOpNull, "is_second_op_null"),
+        REGISTER_NAME(IsSecondOpConstant, "is_second_op_constant"),
+        REGISTER_NAME(IsEqCmp, "is_eq_cmp"),
+        REGISTER_NAME(IsNeCmp, "is_ne_cmp"),
+        REGISTER_NAME(IsGtCmp, "is_gt_cmp"),
+        REGISTER_NAME(IsLtCmp, "is_lt_cmp"),
+        REGISTER_NAME(IsGeCmp, "is_ge_cmp"),
+        REGISTER_NAME(IsLeCmp, "is_le_cmp"),
+        REGISTER_NAME(IsIVCmp, "is_iv_cmp"),
+        REGISTER_NAME(IsBBInLoop, "is_bb_in_loop"),
+        REGISTER_NAME(IsFirstSuccInLoop, "is_first_succ_in_loop"),
+        REGISTER_NAME(IsSecondSuccInLoop, "is_second_succ_in_loop"),
+        REGISTER_NAME(DestNumSuccessors, "dest_num_successors"),
+        REGISTER_NAME(DestNumInstrs, "dest_num_instrs"),
+        REGISTER_NAME(DestNumCriticalEdges, "dest_num_critical_edges"),
+        REGISTER_NAME(DestIsBranchInst, "dest_is_branch_inst"),
+        REGISTER_NAME(DestIsSwitchInst, "dest_is_switch_inst"),
+        REGISTER_NAME(DestIsIndirectBrInst, "dest_is_indirect_br_inst"),
+        REGISTER_NAME(DestIsInvokeInst, "dest_is_invoke_inst"),
+        REGISTER_NAME(DestIsCallBrInst, "dest_is_call_br_inst"),
+        REGISTER_NAME(DestSuccNumber, "dest_succ_number"),
         REGISTER_NAME(CallerBlockFreq, "block_freq"),
         REGISTER_NAME(CallSiteHeight, "callsite_height"),
         REGISTER_NAME(ConstantParam, "nr_ctant_params"),
@@ -170,6 +213,17 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex, std::string>
         REGISTER_NAME(IsInInnerLoop, "is_in_inner_loop"),
         REGISTER_NAME(IsMustTailCall, "is_must_tail"),
         REGISTER_NAME(IsTailCall, "is_tail"),
+        REGISTER_NAME(NumInst, "num_inst"),
+        REGISTER_NAME(NumPhis, "num_phis"),
+        REGISTER_NAME(NumCalls, "num_calls"),
+        REGISTER_NAME(NumLoads, "num_loads"),
+        REGISTER_NAME(NumStores, "num_stores"),
+        REGISTER_NAME(NumPreds, "num_preds"),
+        REGISTER_NAME(NumSuccs, "num_succs"),
+        REGISTER_NAME(EndsWithUnreachable, "ends_with_unreachable"),
+        REGISTER_NAME(EndsWithReturn, "ends_with_return"),
+        REGISTER_NAME(EndsWithCondBranch, "ends_with_cond_branch"),
+        REGISTER_NAME(EndsWithBranch, "ends_with_branch"),
         REGISTER_NAME(NumOfFeatures,"num_features"),
     };
 #undef REGISTER_NAME
@@ -241,6 +295,38 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex,
         REGISTER_SCOPE(ACPOFIExtendedFeaturesInstrPerLoop, Function),
         REGISTER_SCOPE(ACPOFIExtendedFeaturesBlockWithMultipleSuccecorsPerLoop,
                        Function),
+        REGISTER_SCOPE(NumSuccessors, BasicBlock),
+        REGISTER_SCOPE(NumInstrs, BasicBlock),
+        REGISTER_SCOPE(NumCriticalEdges, BasicBlock),
+        REGISTER_SCOPE(HighestNumInstrsInSucc, BasicBlock),
+        REGISTER_SCOPE(SuccNumWithHighestNumInstrs, BasicBlock),
+        REGISTER_SCOPE(IsBranchInst, BasicBlock),
+        REGISTER_SCOPE(IsSwitchInst, BasicBlock),
+        REGISTER_SCOPE(IsIndirectBrInst, BasicBlock),
+        REGISTER_SCOPE(IsInvokeInst, BasicBlock),
+        REGISTER_SCOPE(IsCallBrInst, BasicBlock),
+        REGISTER_SCOPE(IsFirstOpPtr, BasicBlock),
+        REGISTER_SCOPE(IsSecondOpNull, BasicBlock),
+        REGISTER_SCOPE(IsSecondOpConstant, BasicBlock),
+        REGISTER_SCOPE(IsEqCmp, BasicBlock),
+        REGISTER_SCOPE(IsNeCmp, BasicBlock),
+        REGISTER_SCOPE(IsGtCmp, BasicBlock),
+        REGISTER_SCOPE(IsLtCmp, BasicBlock),
+        REGISTER_SCOPE(IsGeCmp, BasicBlock),
+        REGISTER_SCOPE(IsLeCmp, BasicBlock),
+        REGISTER_SCOPE(IsIVCmp, BasicBlock),
+        REGISTER_SCOPE(IsBBInLoop, BasicBlock),
+        REGISTER_SCOPE(IsFirstSuccInLoop, BasicBlock),
+        REGISTER_SCOPE(IsSecondSuccInLoop, BasicBlock),
+        REGISTER_SCOPE(DestNumSuccessors, Edge),
+        REGISTER_SCOPE(DestNumInstrs, Edge),
+        REGISTER_SCOPE(DestNumCriticalEdges, Edge),
+        REGISTER_SCOPE(DestIsBranchInst, Edge),
+        REGISTER_SCOPE(DestIsSwitchInst, Edge),
+        REGISTER_SCOPE(DestIsIndirectBrInst, Edge),
+        REGISTER_SCOPE(DestIsInvokeInst, Edge),
+        REGISTER_SCOPE(DestIsCallBrInst, Edge),
+        REGISTER_SCOPE(DestSuccNumber, Edge),
         REGISTER_SCOPE(CallerBlockFreq, CallSite),
         REGISTER_SCOPE(CallSiteHeight, CallSite),
         REGISTER_SCOPE(ConstantParam, CallSite),
@@ -253,6 +339,17 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex,
         REGISTER_SCOPE(IsInInnerLoop, CallSite),
         REGISTER_SCOPE(IsMustTailCall, CallSite),
         REGISTER_SCOPE(IsTailCall, CallSite),
+        REGISTER_SCOPE(NumInst, MemOpt),
+        REGISTER_SCOPE(NumPhis, MemOpt),
+        REGISTER_SCOPE(NumCalls, MemOpt),
+        REGISTER_SCOPE(NumLoads, MemOpt),
+        REGISTER_SCOPE(NumStores, MemOpt),
+        REGISTER_SCOPE(NumPreds, MemOpt),
+        REGISTER_SCOPE(NumSuccs, MemOpt),
+        REGISTER_SCOPE(EndsWithUnreachable, MemOpt),
+        REGISTER_SCOPE(EndsWithReturn, MemOpt),
+        REGISTER_SCOPE(EndsWithCondBranch, MemOpt),
+        REGISTER_SCOPE(EndsWithBranch, MemOpt),
     };
 #undef REGISTER_SCOPE
 
@@ -341,6 +438,49 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex,
                        ACPOFIExtendedFeatures),
         REGISTER_GROUP(ACPOFIExtendedFeaturesBlockWithMultipleSuccecorsPerLoop,
                        ACPOFIExtendedFeatures),
+        REGISTER_GROUP(NumSuccessors, BasicBlockFeatures),
+        REGISTER_GROUP(NumInstrs, BasicBlockFeatures),
+        REGISTER_GROUP(NumCriticalEdges, BasicBlockFeatures),
+        REGISTER_GROUP(HighestNumInstrsInSucc, BasicBlockFeatures),
+        REGISTER_GROUP(SuccNumWithHighestNumInstrs, BasicBlockFeatures),
+        REGISTER_GROUP(IsBranchInst, BasicBlockFeatures),
+        REGISTER_GROUP(IsSwitchInst, BasicBlockFeatures),
+        REGISTER_GROUP(IsIndirectBrInst, BasicBlockFeatures),
+        REGISTER_GROUP(IsInvokeInst, BasicBlockFeatures),
+        REGISTER_GROUP(IsCallBrInst, BasicBlockFeatures),
+        REGISTER_GROUP(IsFirstOpPtr, BasicBlockFeatures),
+        REGISTER_GROUP(IsSecondOpNull, BasicBlockFeatures),
+        REGISTER_GROUP(IsSecondOpConstant, BasicBlockFeatures),
+        REGISTER_GROUP(IsEqCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsNeCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsGtCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsLtCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsGeCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsLeCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsIVCmp, BasicBlockFeatures),
+        REGISTER_GROUP(IsBBInLoop, BasicBlockFeatures),
+        REGISTER_GROUP(IsFirstSuccInLoop, BasicBlockFeatures),
+        REGISTER_GROUP(IsSecondSuccInLoop, BasicBlockFeatures),
+        REGISTER_GROUP(DestNumSuccessors, EdgeFeatures),
+        REGISTER_GROUP(DestNumInstrs, EdgeFeatures),
+        REGISTER_GROUP(DestNumCriticalEdges, EdgeFeatures),
+        REGISTER_GROUP(DestIsBranchInst, EdgeFeatures),
+        REGISTER_GROUP(DestIsSwitchInst, EdgeFeatures),
+        REGISTER_GROUP(DestIsIndirectBrInst, EdgeFeatures),
+        REGISTER_GROUP(DestIsInvokeInst, EdgeFeatures),
+        REGISTER_GROUP(DestIsCallBrInst, EdgeFeatures),
+        REGISTER_GROUP(DestSuccNumber, EdgeFeatures),
+        REGISTER_GROUP(NumInst, MemOptFeatures),
+        REGISTER_GROUP(NumPhis, MemOptFeatures),
+        REGISTER_GROUP(NumCalls, MemOptFeatures),
+        REGISTER_GROUP(NumLoads, MemOptFeatures),
+        REGISTER_GROUP(NumStores, MemOptFeatures),
+        REGISTER_GROUP(NumPreds, MemOptFeatures),
+        REGISTER_GROUP(NumSuccs, MemOptFeatures),
+        REGISTER_GROUP(EndsWithUnreachable, MemOptFeatures),
+        REGISTER_GROUP(EndsWithReturn, MemOptFeatures),
+        REGISTER_GROUP(EndsWithCondBranch, MemOptFeatures),
+        REGISTER_GROUP(EndsWithBranch, MemOptFeatures),
     };
 #undef REGISTER_GROUP
 
@@ -462,6 +602,39 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex,
         REGISTER_FUNCTION(
             ACPOFIExtendedFeaturesBlockWithMultipleSuccecorsPerLoop,
             calculateACPOFIExtendedFeaturesFeatures),
+        REGISTER_FUNCTION(NumSuccessors, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(NumInstrs, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(NumCriticalEdges, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(HighestNumInstrsInSucc, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(SuccNumWithHighestNumInstrs,
+                          calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsBranchInst, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsSwitchInst, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsIndirectBrInst, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsInvokeInst, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsCallBrInst, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsFirstOpPtr, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsSecondOpNull, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsSecondOpConstant, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsEqCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsNeCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsGtCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsLtCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsGeCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsLeCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsIVCmp, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsBBInLoop, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsFirstSuccInLoop, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(IsSecondSuccInLoop, calculateBasicBlockFeatures),
+        REGISTER_FUNCTION(DestNumSuccessors, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestNumInstrs, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestNumCriticalEdges, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestIsBranchInst, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestIsSwitchInst, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestIsIndirectBrInst, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestIsInvokeInst, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestIsCallBrInst, calculateEdgeFeatures),
+        REGISTER_FUNCTION(DestSuccNumber, calculateEdgeFeatures),
         REGISTER_FUNCTION(CallerBlockFreq, calculateCallerBlockFreq),
         REGISTER_FUNCTION(CallSiteHeight, calculateCallSiteHeight),
         REGISTER_FUNCTION(ConstantParam, calculateConstantParam),
@@ -474,6 +647,17 @@ const std::unordered_map<ACPOCollectFeatures::FeatureIndex,
         REGISTER_FUNCTION(IsInInnerLoop, calculateIsInInnerLoop),
         REGISTER_FUNCTION(IsMustTailCall, calculateIsMustTailCall),
         REGISTER_FUNCTION(IsTailCall, calculateIsTailCall),
+        REGISTER_FUNCTION(NumInst, calculateMemOptFeatures),
+        REGISTER_FUNCTION(NumPhis, calculateMemOptFeatures),
+        REGISTER_FUNCTION(NumCalls, calculateMemOptFeatures),
+        REGISTER_FUNCTION(NumLoads, calculateMemOptFeatures),
+        REGISTER_FUNCTION(NumStores, calculateMemOptFeatures),
+        REGISTER_FUNCTION(NumPreds, calculateMemOptFeatures),
+        REGISTER_FUNCTION(NumSuccs, calculateMemOptFeatures),
+        REGISTER_FUNCTION(EndsWithUnreachable, calculateMemOptFeatures),
+        REGISTER_FUNCTION(EndsWithReturn, calculateMemOptFeatures),
+        REGISTER_FUNCTION(EndsWithCondBranch, calculateMemOptFeatures),
+        REGISTER_FUNCTION(EndsWithBranch, calculateMemOptFeatures),
     };
 #undef REGISTER_FUNCTION
 
@@ -859,6 +1043,68 @@ void calculateOptCode(ACPOCollectFeatures &ACF,
                              OptCode);
 }
 
+static void
+calculateMemOptFeatures(ACPOCollectFeatures &ACF,
+                        const ACPOCollectFeatures::FeatureInfo &Info) {
+  auto *BB = Info.SI.BB;
+  auto *FAM = Info.Managers.FAM;
+  auto *T = BB->getTerminator();
+
+  int num_insts = 0;
+  int num_phis = 0;
+  int num_calls = 0;
+  int num_loads = 0;
+  int num_stores = 0;
+  bool end_with_cond_branch = 0;
+  bool end_with_branch = 0;
+
+  for (auto &inst : *BB) {
+    num_insts++;
+    if (isa<PHINode>(inst))
+      num_phis++;
+    if (isa<CallInst>(inst))
+      num_calls++;
+    if (isa<LoadInst>(inst))
+      num_loads++;
+    if (isa<StoreInst>(inst))
+      num_stores++;
+  }
+
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumInst, Info,
+                             std::to_string(num_insts));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumPhis, Info,
+                             std::to_string(num_phis));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumCalls, Info,
+                             std::to_string(num_calls));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumLoads, Info,
+                             std::to_string(num_loads));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumStores, Info,
+                             std::to_string(num_stores));
+  ACF.setFeatureValueAndInfo(
+      ACPOCollectFeatures::FeatureIndex::NumPreds, Info,
+      std::to_string(std::distance(pred_begin(BB), pred_end(BB))));
+  ACF.setFeatureValueAndInfo(
+      ACPOCollectFeatures::FeatureIndex::NumSuccs, Info,
+      std::to_string(std::distance(succ_begin(BB), succ_end(BB))));
+  ACF.setFeatureValueAndInfo(
+      ACPOCollectFeatures::FeatureIndex::EndsWithUnreachable, Info,
+      std::to_string(isa<UnreachableInst>(*T)));  
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::EndsWithReturn,
+                             Info, std::to_string(isa<ReturnInst>(*T)));
+  if (auto *BR = dyn_cast<BranchInst>(T)) {
+    if (BR->isConditional())
+      end_with_cond_branch = true;
+    else if (BR->isUnconditional())
+      end_with_branch = true;
+  }
+
+  ACF.setFeatureValueAndInfo(
+      ACPOCollectFeatures::FeatureIndex::EndsWithCondBranch, Info,
+      std::to_string(end_with_cond_branch));  
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::EndsWithBranch,
+                             Info, std::to_string(end_with_branch));
+}
+
 void calculateInlineCostFeatures(ACPOCollectFeatures &ACF,
                                  const ACPOCollectFeatures::FeatureInfo &Info) {
   assert(Info.Idx == ACPOCollectFeatures::FeatureIndex::NumOfFeatures ||
@@ -1064,6 +1310,190 @@ void calculateACPOFIExtendedFeaturesFeatures(
     ACF.setFeatureValueAndInfo(Idx, Info,
                                std::to_string(FF.NamedFloatFeatures[TmpIdx]));
   }
+}
+
+void calculateBasicBlockFeatures(
+    ACPOCollectFeatures &ACF, const ACPOCollectFeatures::FeatureInfo &Info) {
+  assert(Info.Idx == ACPOCollectFeatures::FeatureIndex::NumOfFeatures ||
+         ACPOCollectFeatures::getFeatureGroup(Info.Idx) == 
+             ACPOCollectFeatures::GroupID::BasicBlockFeatures);
+
+  // check if we already calculated the values.
+  if (ACF.containsFeature(ACPOCollectFeatures::GroupID::BasicBlockFeatures))
+    return;
+
+  auto *BB = Info.SI.BB;
+  auto *F = Info.SI.F;
+  auto *FAM = Info.Managers.FAM;
+
+  assert(BB && F && FAM && "One of BB, F or FAM is nullptr");
+
+  unsigned NumInstrs = std::distance(BB->instructionsWithoutDebug().begin(), 
+                                     BB->instructionsWithoutDebug().end());
+  
+  unsigned NumCriticalEdges = 0;
+  for (auto &BBI : *F) {
+    const Instruction *TI = BBI.getTerminator();
+    for (unsigned I = 0, E = TI->getNumSuccessors(); I != E; ++I) {
+      if(isCriticalEdge(TI, I))
+        NumCriticalEdges++;
+    }
+  }
+
+  Instruction *TI = BB->getTerminator();
+  unsigned HighestNumInstrsInSucc = 0;
+  unsigned SuccNumWithHighestNumInstrs = 0;
+  
+  for (unsigned I = 0, E = TI->getNumSuccessors(); I != E; ++I) {
+    BasicBlock *Succ = TI->getSuccessor(I);
+    unsigned CurrNumInstrs = std::distance(Succ->instructionsWithoutDebug().begin(),
+            Succ->instructionsWithoutDebug().end());
+    if (CurrNumInstrs > HighestNumInstrsInSucc) {
+      HighestNumInstrsInSucc = CurrNumInstrs;
+      SuccNumWithHighestNumInstrs = GetSuccessorNumber(BB, Succ);
+    }
+  }
+
+  bool IsFirstOpPtr = false;
+  bool IsSecondOpNull = false;
+  bool IsSecondOpConstant = false;
+  bool IsEqCmp = false;
+  bool IsNeCmp = false;
+  bool IsGtCmp = false;
+  bool IsLtCmp = false;
+  bool IsGeCmp = false;
+  bool IsLeCmp = false;
+  bool IsIndVarCmp = false;
+  bool IsBBInLoop = false;
+  bool IsFirstSuccInLoop = false;
+  bool IsSecondSuccInLoop = false;
+  if (BranchInst *BI = dyn_cast<BranchInst>(TI)) {
+    if(BI->isConditional()) {
+      Value *Cond = BI->getCondition();
+      if (ICmpInst *CI = dyn_cast<ICmpInst>(Cond)) {
+        Value *LHS = CI->getOperand(0);
+        IsFirstOpPtr = LHS->getType()->isPointerTy();
+        Value *RHS = CI->getOperand(1);
+        IsSecondOpNull = isa<ConstantPointerNull>(RHS);
+        IsSecondOpConstant = isa<Constant>(RHS);
+        CmpInst::Predicate Pred = CI->getPredicate();
+        IsEqCmp = Pred == CmpInst::ICMP_EQ;
+        IsNeCmp = Pred == CmpInst::ICMP_NE;
+        IsGtCmp = ICmpInst::isGT(Pred);
+        IsLtCmp = ICmpInst::isLT(Pred);
+        IsGeCmp = ICmpInst::isGE(Pred);
+        IsLeCmp = ICmpInst::isLE(Pred);
+      }
+
+      LoopInfo &LI = FAM->getResult<LoopAnalysis>(*F);
+      ScalarEvolution &SE = FAM->getResult<ScalarEvolutionAnalysis>(*F);
+      for (auto &L : LI) {
+        IsBBInLoop = (IsBBInLoop || L->contains(BB));
+        IsFirstSuccInLoop = (IsFirstSuccInLoop || L->contains(TI->getSuccessor(0)));
+        IsSecondSuccInLoop = (IsSecondSuccInLoop || L->contains(TI->getSuccessor(1)));
+        if (PHINode *IndVar = L->getInductionVariable(SE))
+          if (IndVar->getParent() == BB)
+            IsIndVarCmp = true;
+      }
+    }
+  }
+
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsSecondSuccInLoop,
+                             Info, std::to_string(IsSecondSuccInLoop));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsFirstSuccInLoop,
+                             Info, std::to_string(IsFirstSuccInLoop));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsBBInLoop,
+                             Info, std::to_string(IsBBInLoop));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsIVCmp,
+                             Info, std::to_string(IsIndVarCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsLeCmp,
+                             Info, std::to_string(IsLeCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsGeCmp,
+                             Info, std::to_string(IsGeCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsLtCmp,
+                             Info, std::to_string(IsLtCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsGtCmp,
+                             Info, std::to_string(IsGtCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsEqCmp,
+                             Info, std::to_string(IsEqCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsNeCmp,
+                             Info, std::to_string(IsNeCmp));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsSecondOpConstant,
+                             Info, std::to_string(IsSecondOpConstant));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsSecondOpNull,
+                             Info, std::to_string(IsSecondOpNull));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsFirstOpPtr,
+                             Info, std::to_string(IsFirstOpPtr));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsCallBrInst,
+                             Info, std::to_string(isa<CallBrInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsInvokeInst,
+                             Info, std::to_string(isa<InvokeInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsIndirectBrInst,
+                             Info, std::to_string(isa<IndirectBrInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsSwitchInst,
+                             Info, std::to_string(isa<SwitchInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::IsBranchInst,
+                             Info, std::to_string(isa<BranchInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::SuccNumWithHighestNumInstrs,
+                             Info, std::to_string(SuccNumWithHighestNumInstrs));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::HighestNumInstrsInSucc,
+                             Info, std::to_string(HighestNumInstrsInSucc));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumCriticalEdges,
+                             Info, std::to_string(NumCriticalEdges));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumInstrs,
+                             Info, std::to_string(NumInstrs));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::NumSuccessors,
+                             Info, std::to_string(TI->getNumSuccessors()));
+}
+
+void calculateEdgeFeatures(
+  ACPOCollectFeatures &ACF, const ACPOCollectFeatures::FeatureInfo &Info) {
+  assert(Info.Idx == ACPOCollectFeatures::FeatureIndex::NumOfFeatures ||
+         ACPOCollectFeatures::getFeatureGroup(Info.Idx) ==
+            ACPOCollectFeatures::GroupID::EdgeFeatures);
+  
+  // Check if we already calculated the values.
+  if (ACF.containsFeature(ACPOCollectFeatures::GroupID::EdgeFeatures))
+    return;
+
+  auto *BB = Info.SI.BB;
+  auto *DestBB = Info.SI.DestBB;
+  auto *F = Info.SI.F;
+  auto *FAM = Info.Managers.FAM;
+
+  assert(BB && DestBB && F && FAM && "One of BB, DestBB, F or FAM is nullptr");
+
+  unsigned DestNumInstrs = std::distance(DestBB->instructionsWithoutDebug().begin(),
+                                         DestBB->instructionsWithoutDebug().end());
+
+  unsigned DestNumCriticalEdges = 0;
+  for(auto &BBI : *F) {
+    const Instruction *TI = BBI.getTerminator();
+    for (unsigned I = 0, E = TI->getNumSuccessors(); I != E; ++I) {
+      if (isCriticalEdge(TI, I))
+        DestNumCriticalEdges++;
+    }
+  }
+
+  const Instruction *TI = DestBB->getTerminator();
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestSuccNumber,
+                             Info, std::to_string(GetSuccessorNumber(BB, DestBB)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestIsCallBrInst,
+                             Info, std::to_string(isa<CallBrInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestIsInvokeInst,
+                             Info, std::to_string(isa<InvokeInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestIsIndirectBrInst,
+                             Info, std::to_string(isa<IndirectBrInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestIsSwitchInst,
+                             Info, std::to_string(isa<SwitchInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestIsBranchInst,
+                             Info, std::to_string(isa<BranchInst>(TI)));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestNumCriticalEdges,
+                             Info, std::to_string(DestNumCriticalEdges));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestNumInstrs,
+                             Info, std::to_string(DestNumInstrs));
+  ACF.setFeatureValueAndInfo(ACPOCollectFeatures::FeatureIndex::DestNumSuccessors,
+                             Info, std::to_string(TI->getNumSuccessors()));
 }
 
 void calculateIsIndirectCall(ACPOCollectFeatures &ACF,

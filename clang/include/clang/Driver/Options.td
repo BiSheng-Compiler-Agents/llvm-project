@@ -1404,6 +1404,10 @@ def fcs_profile_generate : Flag<["-"], "fcs-profile-generate">,
 def fcs_profile_generate_EQ : Joined<["-"], "fcs-profile-generate=">,
     Group<f_Group>, Flags<[CoreOption]>, MetaVarName<"<directory>">,
     HelpText<"Generate instrumented code to collect context sensitive execution counts into <directory>/default.profraw (overridden by LLVM_PROFILE_FILE env var)">;
+def fai4c_recipe: Flag<["-"], "fai4c-recipe">, Group<f_Group>,
+    Flags<[CC1Option]>, MarshallingInfoFlag<CodeGenOpts<"AI4CRecipe">>;
+def fai4c_analysis: Flag<["-"], "fai4c-analysis">, Group<f_Group>,
+    Flags<[CC1Option]>,MarshallingInfoFlag<CodeGenOpts<"AI4CAnalysis">>;
 def fprofile_use : Flag<["-"], "fprofile-use">, Group<f_Group>,
     Flags<[CoreOption]>, Alias<fprofile_instr_use>;
 def fprofile_use_EQ : Joined<["-"], "fprofile-use=">,
