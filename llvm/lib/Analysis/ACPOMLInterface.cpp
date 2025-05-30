@@ -1468,7 +1468,7 @@ createIR2Score(std::vector<std::pair<std::string, std::string>> Inputs,
                StringRef Decision) {
   // PLACEHOLDER
   LLVMContext Ctx;
-  return std::make_unique<ProteanModelRunner>(Ctx, Inputs, Decision);
+  return std::make_unique<IR2ScoreModelRunner>(Ctx, Inputs, Decision);
 }
 
 // Generate map using ifdefs for now, in the future we could have this
