@@ -26,6 +26,10 @@ enum IRCostFunction { FileSize, InstCount, IRAnalysis, MCA };
 
 enum CoolingType { Geometric, Linear };
 
+// TODO, this should update as we change the embedding size
+const int IR2VEC_DIMENTION = 300;
+const int IR2VEC_EMBEDDING_SIZE = IR2VEC_DIMENTION * sizeof(double);
+
 // A base class for simulated annealing
 template <class State> class SimulatedAnnealingBase {
 private:

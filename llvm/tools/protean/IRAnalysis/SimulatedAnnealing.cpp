@@ -23,6 +23,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR2Vec/IR2Vec.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -57,6 +58,7 @@
 struct SharedMemoryData {
   size_t bitcode_size;
   bool ModLevelIPC;
+  size_t ir2vec_dimension;
   size_t featureCount;
   size_t dataSize;
   size_t dataOffset;
@@ -200,6 +202,7 @@ int createSharedMemory(const char *shm_name, size_t shm_size,
   header->dataSize = shm_size - sizeof(SharedMemoryData);
   header->ModLevelIPC = ModLevelIPC;
   header->dataOffset = sizeof(SharedMemoryData);
+  header->ir2vec_dimension = IR2VEC_DIMENTION;
 
   close(shm_fd);
   return 0;
@@ -293,7 +296,7 @@ void readFeaturesFromSharedMemory(
     return;
   }
 
-  char *ptr = (char *)shared_data + shared_data->dataOffset;
+  char *ptr = (char *)shared_data + shared_data->dataOffset + IR2VEC_EMBEDDING_SIZE;
   char *end_ptr = (char *)shared_data + shm_size;
 
   for (size_t i = 0; i < shared_data->featureCount; ++i) {
@@ -314,6 +317,46 @@ void readFeaturesFromSharedMemory(
     std::string value = ss.str();
 
     Features.push_back(std::make_pair(key, value));
+  }
+
+  munmap(shared_data, shm_size);
+  close(shm_fd);
+}
+
+void readIR2VecFromSharedMemory(
+    const char *shm_name,
+    std::vector<std::pair<std::string, std::string>> &Features) {
+  int shm_fd = shm_open(shm_name, O_RDWR, 0666);
+  if (shm_fd == -1) {
+    perror("shm_open");
+    return;
+  }
+
+  SharedMemoryData *shared_data =
+      (SharedMemoryData *)mmap(nullptr, sizeof(SharedMemoryData),
+                               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (shared_data == MAP_FAILED) {
+    perror("mmap (reader)");
+    close(shm_fd);
+    return;
+  }
+  size_t shm_size = sizeof(SharedMemoryData) + shared_data->dataSize;
+
+  munmap(shared_data, 0);
+  shared_data = (SharedMemoryData *)mmap(
+      nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (shared_data == MAP_FAILED) {
+    perror("mmap (remap reader)");
+    return;
+  }
+
+  double *ptr = (double *)((char *)shared_data + shared_data->dataOffset);
+
+  for (size_t i = 0; i < IR2VEC_DIMENTION; ++i) {
+    double value;
+    memcpy(&value, ptr, sizeof(double));
+    ptr += 1; // pointer arithmetic on double ptrs automatically works
+    Features.push_back(std::make_pair("IR2Vec_" + std::to_string(i + 1), std::to_string(static_cast<float>(value))));
   }
 
   munmap(shared_data, shm_size);
@@ -383,7 +426,7 @@ void SimulatedAnnealingProtean::run() {
     if (ModLevelIPC)
       shm_size = sizeof(SharedMemoryData) + MAX_BITCODE_SIZE;
     else
-      shm_size = IRModel->getModelFeaturesSize() + sizeof(SharedMemoryData);
+      shm_size = IRModel->getModelFeaturesSize() + IR2VEC_EMBEDDING_SIZE + sizeof(SharedMemoryData);
 
     static std::mutex mutex;
     std::lock_guard<std::mutex> lock(mutex);
@@ -510,95 +553,56 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
     return -1;
   }
-  if (UseProteanCollect) {
-    if (ModLevelIPC) {
-      std::error_code EC;
-      std::string SAModelFile = "Simulated-annealing-model";
-      llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
-                                 llvm::sys::fs::FA_Write,
-                                 llvm::sys::fs::OF_Append);
-      llvm::formatted_raw_ostream OS(RawOS);
-      llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
 
-      LLVM_DEBUG(llvm::dbgs() << "Parsing module\n");
-      const char *shm_name = "/shm";
-      llvm::Expected<std::unique_ptr<llvm::Module>> moduleOrErr =
-          readModuleFromSharedMemory(shm_name, Context);
+  const char *shm_name = "/shm";
 
-      if (moduleOrErr) {
-        M = std::move(moduleOrErr.get());
-        LLVM_DEBUG(llvm::dbgs() << "Module read from shared memory.\n");
-      } else {
-        llvm::errs() << "Error reading module: "
-                     << llvm::toString(moduleOrErr.takeError()) << "\n";
-      }
+  if (ModLevelIPC) {
+    // Read the module from memory
+    std::error_code EC;
+    std::string SAModelFile = "Simulated-annealing-model";
+    llvm::raw_fd_ostream RawOS(SAModelFile, EC, llvm::sys::fs::CD_OpenAlways,
+                                llvm::sys::fs::FA_Write,
+                                llvm::sys::fs::OF_Append);
+    llvm::formatted_raw_ostream OS(RawOS);
+    llvm::ModelDataScoreCollector MDC(OS, SAModelFile);
 
-      if (previousModuleIdentifiers.find(M->getModuleIdentifier()) ==
-          previousModuleIdentifiers.end()) {
-        // New identifier found
-        LLVM_DEBUG(llvm::dbgs() << "Module Identifier changed\n");
-        previousModuleIdentifiers.insert(M->getModuleIdentifier());
-      }
+    LLVM_DEBUG(llvm::dbgs() << "Parsing module\n");
+    llvm::Expected<std::unique_ptr<llvm::Module>> moduleOrErr =
+        readModuleFromSharedMemory(shm_name, Context);
+
+    if (moduleOrErr) {
+      M = std::move(moduleOrErr.get());
+      LLVM_DEBUG(llvm::dbgs() << "Module read from shared memory.\n");
+    } else {
+      llvm::errs() << "Error reading module: "
+                    << llvm::toString(moduleOrErr.takeError()) << "\n";
+    }
+
+    if (previousModuleIdentifiers.find(M->getModuleIdentifier()) ==
+        previousModuleIdentifiers.end()) {
+      // New identifier found
+      LLVM_DEBUG(llvm::dbgs() << "Module Identifier changed\n");
+      previousModuleIdentifiers.insert(M->getModuleIdentifier());
+    }
+
+    if (UseProteanCollect) {
       MDC.collectFeatures(M);
       Features = MDC.getFeatures();
     } else {
-      const char *shm_name = "/shm";
-      readFeaturesFromSharedMemory(shm_name, Features);
+      auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENTION);
+      IR2Vec::Vector prgmVec = ir2vec.getProgramVector();
+      for (int i = 0; i < prgmVec.size(); ++i) {
+        std::string Feature = "IR2Vec_";
+        Feature += std::to_string(i + 1);
+        Features.push_back({Feature, std::to_string(prgmVec[i])});
+      }
     }
   } else {
-    std::optional<std::string> IR2VecBinaryPath =
-        llvm::sys::Process::GetEnv("IR2VEC_PATH");
-    if (!IR2VecBinaryPath) {
-      llvm::errs() << "Please Export IR2VEC_PATH\n";
-      return -1;
-    }
-
-    std::string IR2VecOutputPath = BishengAcpoDir.value() + "/ir2vec.output";
-    std::ofstream EraseFile(IR2VecOutputPath, std::ios::out | std::ios::trunc);
-    if (EraseFile.is_open()) {
-      EraseFile.close();
+    // TODO update both these methods
+    if (UseProteanCollect) {
+      readFeaturesFromSharedMemory(shm_name, Features);
     } else {
-      LLVM_DEBUG(llvm::dbgs() << "IR2Vec output not found\n");
-    }
-
-    std::string Command = IR2VecBinaryPath.value() + " -fa -o " +
-                          IR2VecOutputPath + " -level p " + OutputFilename;
-    const char *ConstCommand = Command.c_str();
-    int Passed = system(ConstCommand);
-    if (Passed != 0) {
-      LLVM_DEBUG(llvm::dbgs() << "IR2Vec failed\n");
-      return -1;
-    }
-
-    if (!UseAOTModel) {
-      std::string NormalizePath =
-          "python3 " + BishengAcpoDir.value() + "/models/model_v1/normalize.py";
-      const char *NormalizeCommand = NormalizePath.c_str();
-      int NormPassed = system(NormalizeCommand);
-      if (NormPassed != 0) {
-        LLVM_DEBUG(llvm::dbgs() << "normalize.py failed\n");
-        return -1;
-      }
-    }
-
-    std::ifstream IR2VecFile(IR2VecOutputPath);
-    if (IR2VecFile.is_open()) {
-      std::string Line;
-      while (std::getline(IR2VecFile, Line)) {
-        auto Values = splitByChar(Line, '\t');
-        LLVM_DEBUG(llvm::dbgs() << "Features:");
-        for (int i = 0; i < Values.size(); i++) {
-          std::string Feature = "IR2Vec_";
-          Feature += std::to_string(i + 1);
-          Features.push_back({Feature, Values[i]});
-          LLVM_DEBUG(llvm::dbgs() << "{" << Feature << " " << Values[i] << "}");
-        }
-        LLVM_DEBUG(llvm::dbgs() << '\n');
-        break;
-      }
-      IR2VecFile.close();
-    } else {
-      LLVM_DEBUG(llvm::dbgs() << "Cannot read from IR2Vec.output\n");
+      readIR2VecFromSharedMemory(shm_name, Features);
     }
   }
 

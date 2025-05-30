@@ -40,6 +40,7 @@
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/IR2Vec/IR2Vec.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
@@ -72,6 +73,7 @@
 struct SharedMemoryData {
   size_t bitcode_size;
   bool ModLevelIPC;
+  size_t ir2vec_dimension;
   size_t featureCount;
   size_t dataSize;
   size_t dataOffset;
@@ -275,12 +277,14 @@ public:
       M->addModuleFlag(llvm::Module::Append, HEADER_FLAG, HeaderNode);
       M->addModuleFlag(llvm::Module::Append, VALUE_FLAG, ValueNode);
     }
-    
+
     if (UseProteanInitialPasses) {
       if (shareModule())
         writeModule(M);
-      else
-        writeFeatures(FinalFeatures);
+      else {
+        auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, 300);
+        writeFeatures(FinalFeatures, ir2vec.getProgramVector());
+      }
     }
   }
 
@@ -307,7 +311,7 @@ public:
     return result;
   }
 
-  void writeFeatures(std::unordered_map<std::string, float> FinalFeatures) {
+  void writeFeatures(std::unordered_map<std::string, float> FinalFeatures, IR2Vec::Vector &pgmVector) {
     const char *shm_name = "/shm";
     int shm_fd = shm_open(shm_name, O_RDWR, 0666);
     if (shm_fd == -1) {
@@ -336,7 +340,14 @@ public:
       return;
     }
 
-    char *ptr = (char *)shared_data + shared_data->dataOffset;
+    double *ir2vec_ptr = (double*) ((char*)shared_data + shared_data->dataOffset);
+
+    for (int i = 0; i < shared_data->ir2vec_dimension; ++i) {
+      memcpy(ir2vec_ptr, &pgmVector[i], sizeof(double));
+      ir2vec_ptr += 1;
+    }
+
+    char *ptr = (char *)shared_data + shared_data->dataOffset + (sizeof(double) * shared_data->ir2vec_dimension);
     char *end_ptr = (char *)shared_data + shm_size;
 
     for (const auto &pair : FinalFeatures) {
