@@ -1,0 +1,16 @@
+ModelName=AI4CFH
+Features={BlockWithMultipleSuccecorsPerLoop, float32}, {PtrArgs, float32}, {MaxDomTreeLevel, float32}, {IsLinkOnceODR, float32}, {IsLocal, float32}, {Calls, float32}, {Blocks, float32}, {InitialSize, float32}, {MaxLoopDepth, float32}, {users, float32}, {InstructionPerBlock, float32}, {Loops, float32}, {conditionally_executed_blocks, float32}, {IsLinkOnce, float32}, {basic_block_count, float32}, {PtrCallee, float32}, {CallReturnPtr, float32}, {ConditionalBranch, float32}, {CBwithArg, float32}, {CallerHeight, float32}, {CallUsage, float32}, {IsRecursive, float32}, {NumCallsiteInLoop, float32}, {NumOfCallUsesInLoop, float32}, {EntryBlockFreq, float32}, {MaxCallsiteBlockFreq, float32}, {SuccessorPerBlock, float32}, {AvgVecInstr, float32}, {AvgNestedLoopLevel, float32}, {InstrPerLoop, float32}
+Outputs={FH, int64}
+Signature=serving_default
+ModelDirectory=./models/ai4c-fh
+OutputKey=output_0
+ModelInference=
+# Above ModelInference need to be updated on python side
+ModelName=AI4CFH
+Features={BlockWithMultipleSuccecorsPerLoop, float32}, {PtrArgs, float32}, {MaxDomTreeLevel, float32}, {IsLinkOnceODR, float32}, {IsLocal, float32}, {Calls, float32}, {Blocks, float32}, {InitialSize, float32}, {MaxLoopDepth, float32}, {users, float32}, {InstructionPerBlock, float32}, {Loops, float32}, {conditionally_executed_blocks, float32}, {IsLinkOnce, float32}, {basic_block_count, float32}, {PtrCallee, float32}, {CallReturnPtr, float32}, {ConditionalBranch, float32}, {CBwithArg, float32}, {CallerHeight, float32}, {CallUsage, float32}, {IsRecursive, float32}, {NumCallsiteInLoop, float32}, {NumOfCallUsesInLoop, float32}, {EntryBlockFreq, float32}, {MaxCallsiteBlockFreq, float32}, {SuccessorPerBlock, float32}, {AvgVecInstr, float32}, {AvgNestedLoopLevel, float32}, {InstrPerLoop, float32}
+Outputs={FH, int64}
+Signature=serving_default
+ModelDirectory=./models/ai4c-fh
+OutputKey=output_0
+ModelInference=
+# Above ModelInference need to be updated on python side
