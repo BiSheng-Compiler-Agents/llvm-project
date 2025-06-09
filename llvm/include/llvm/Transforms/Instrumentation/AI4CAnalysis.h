@@ -1,3 +1,5 @@
+#if defined(ENABLE_ACPO)
+
 #ifndef LLVM_TRANSFORMS_INSTRUMENTATION_AI4CANALYSIS_H
 #define LLVM_TRANSFORMS_INSTRUMENTATION_AI4CANALYSIS_H
 
@@ -24,3 +26,4 @@ public:
 }// end name sace llvm
 
 #endif
+#endif // Enable_ACPO

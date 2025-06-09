@@ -7,7 +7,7 @@
 // Copyright (C) 2025. Huawei Technologies Co., Ltd. All rights reserved.
 //
 //==-----------------------------------------------------------------------===//
-
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_ANALYSIS_ACPOBWMODEL_H
 #define LLVM_ANALYSIS_ACPOBWMODEL_H
 
@@ -37,3 +37,4 @@ private:
 } // end namespace llvm
 
 #endif // LLVM_ANALYSIS_ACPOBWMODEL_H
+#endif // ENABLE_ACPO

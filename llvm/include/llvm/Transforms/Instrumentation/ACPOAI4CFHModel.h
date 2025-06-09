@@ -1,3 +1,4 @@
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_TRANSFORMS_ACPOAI4CFHMODEL_H
 #define LLVM_TRANSFORMS_ACPOAI4CFHMODEL_H
 
@@ -29,3 +30,4 @@ private:
 } // end namespace llvm
 
 #endif
+#endif //Enable_ACPO

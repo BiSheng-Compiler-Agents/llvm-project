@@ -589,7 +589,9 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
 
   invokePeepholeEPCallbacks(FPM, Level);
 
+#if defined(ENABLE_ACPO)
   if (PTO.AI4CAnalysis && !Level.isOptimizingForSize()) FPM.addPass(PGOMemOPSizeOpt());
+#endif
 
   // For PGO use pipeline, try to optimize memory intrinsics such as memcpy
   // using the size value profile. Don't perform this when optimizing for size.
@@ -759,6 +761,7 @@ void PassBuilder::addRequiredLTOPreLinkPasses(ModulePassManager &MPM) {
   MPM.addPass(NameAnonGlobalPass());
 }
 
+#if defined(ENABLE_ACPO)
 void PassBuilder::addAI4CRelatedPassesForO0(ModulePassManager &MPM) {
   MPM.addPass(AI4CAnalysis());
   MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
@@ -799,6 +802,7 @@ void PassBuilder::addAI4CRelatedPasses(ModulePassManager &MPM,
     MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
   }
 }
+#endif
 
 void PassBuilder::addPGOInstrPasses(ModulePassManager &MPM,
                                     OptimizationLevel Level, bool RunProfileGen,
@@ -900,6 +904,7 @@ void PassBuilder::addPGOInstrPassesForO0(
   MPM.addPass(InstrProfiling(Options, IsCS));
 }
 
+#if defined(ENABLE_ACPO)
 void PassBuilder::addACPOBWPasses(ModulePassManager &MPM, OptimizationLevel Level, ThinOrFullLTOPhase LTOPhase, bool skipPreInline) {
   assert(Level != OptimizationLevel::O0 && "Not expecting O0 here!");
   if (!skipPreInline && !DisablePreInliner) {
@@ -929,6 +934,7 @@ void PassBuilder::addACPOBWPasses(ModulePassManager &MPM, OptimizationLevel Leve
   MPM.addPass(ACPOBranchWeightModelPass());
   MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
 }
+#endif
 
 static InlineParams getInlineParamsFromOptLevel(OptimizationLevel Level) {
   return getInlineParams(Level.getSpeedupLevel(), Level.getSizeLevel());
@@ -952,8 +958,10 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
       PGOOpt->Action == PGOOptions::SampleUse)
     IP.HotCallSiteThreshold = 0;
 
+#if defined(ENABLE_ACPO)
   if (PTO.AI4CAnalysis)
     IP.EnableDeferral = EnablePGOInlineDeferral;
+#endif
 
   if (PGOOpt)
     IP.EnableDeferral = EnablePGOInlineDeferral;
@@ -1055,8 +1063,10 @@ PassBuilder::buildModuleInlinerPipeline(OptimizationLevel Level,
       PGOOpt->Action == PGOOptions::SampleUse)
     IP.HotCallSiteThreshold = 0;
 
+#if defined(ENABLE_ACPO)
   if (PTO.AI4CAnalysis)
     IP.EnableDeferral = EnablePGOInlineDeferral;
+#endif
 
   if (PGOOpt)
     IP.EnableDeferral = EnablePGOInlineDeferral;
@@ -1210,10 +1220,13 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   MPM.addPass(createModuleToFunctionPassAdaptor(std::move(GlobalCleanupPM),
                                                 PTO.EagerlyInvalidateAnalyses));
 
+#if defined(ENABLE_ACPO)                                                
   if (PTO.AI4CAnalysis && Phase != ThinOrFullLTOPhase::ThinLTOPostLink) {
     addAI4CRelatedPasses(MPM, Level, Phase);
     MPM.addPass(PGOIndirectCallPromotion(false, false));
   }
+#endif
+
   // Add all the requested passes for instrumentation PGO, if requested.
   if (PGOOpt && Phase != ThinOrFullLTOPhase::ThinLTOPostLink &&
       (PGOOpt->Action == PGOOptions::IRInstr ||
@@ -1237,8 +1250,10 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
     MPM.addPass(SyntheticCountsPropagation());
 
 #if defined(ENABLE_AUTOTUNER)
+#if defined(ENABLE_ACPO)
   if (!PGOOpt && EnableACPOBWModel)
     addACPOBWPasses(MPM, Level, Phase, false);
+#endif  
   if (AutoTuningCompileMode)
     MPM.addPass(AutoTuningCompileModulePass(autotuning::CompileOptionInline));
 #endif
@@ -1454,8 +1469,10 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
                         PGOOpt->ProfileRemappingFile, LTOPhase, PGOOpt->FS);
   }
 
+#if defined(ENABLE_ACPO)
   if (!LTOPreLink && !PGOOpt && EnableACPOBWModel)
     addACPOBWPasses(MPM, Level, LTOPhase, true);
+#endif
 
   // Re-compute GlobalsAA here prior to function passes. This is particularly
   // useful as the above will have inlined, DCE'ed, and function-attr
@@ -1950,8 +1967,10 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
                         ThinOrFullLTOPhase::FullLTOPostLink, PGOOpt->FS);
   }
 
+#if defined(ENABLE_ACPO)  
   if (!PGOOpt && EnableACPOBWModel)
     addACPOBWPasses(MPM, Level, ThinOrFullLTOPhase::FullLTOPostLink, true);
+#endif
 
   // Break up allocas
   FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
@@ -2090,8 +2109,10 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
   if (PGOOpt && PGOOpt->PseudoProbeForProfiling)
     MPM.addPass(SampleProfileProbePass(TM));
 
+#if defined(ENABLE_ACPO)   
   if (PTO.AI4CAnalysis)
     addAI4CRelatedPassesForO0(MPM);
+#endif
 
   if (PGOOpt && (PGOOpt->Action == PGOOptions::IRInstr ||
                  PGOOpt->Action == PGOOptions::IRUse))
@@ -2179,11 +2200,13 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
   return MPM;
 }
 
+#if defined(ENABLE_ACPO)
 ModulePassManager PassBuilder::addAutoTunerLTOPreLinkPasses() {
   ModulePassManager MPM;
   addRequiredLTOPreLinkPasses(MPM);
   return MPM;
 }
+#endif
 
 AAManager PassBuilder::buildDefaultAAPipeline() {
   AAManager AA;

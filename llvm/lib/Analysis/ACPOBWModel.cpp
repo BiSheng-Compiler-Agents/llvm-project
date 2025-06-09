@@ -13,6 +13,7 @@
 //
 //==-----------------------------------------------------------------------===//
 
+#if defined(ENABLE_ACPO)
 #include "llvm/Analysis/ACPOBWModel.h"
 
 using namespace llvm;
@@ -56,3 +57,4 @@ std::unique_ptr<ACPOAdvice> ACPOBWModel::getAdviceML() {
 }
 
 std::unique_ptr<ACPOAdvice> ACPOBWModel::getAdviceNoML() { return nullptr; }
+#endif // ENABLE_ACPO

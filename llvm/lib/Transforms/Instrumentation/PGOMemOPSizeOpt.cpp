@@ -20,7 +20,6 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
-#include "llvm/Analysis/ModelDataCollector.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/BasicBlock.h"
@@ -40,17 +39,21 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/Process.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Instrumentation/PGOInstrumentation.h"
-#include "llvm/Transforms/Instrumentation/ACPOAI4CMEMOPModel.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <cassert>
 #include <cstdint>
 #include <vector>
+
+#if defined(ENABLE_ACPO)
+#include "llvm/Analysis/ModelDataCollector.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/Process.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Instrumentation/ACPOAI4CMEMOPModel.h"
+#endif
 
 using namespace llvm;
 
@@ -98,6 +101,7 @@ static cl::opt<unsigned>
     MemOpMaxOptSize("memop-value-prof-max-opt-size", cl::Hidden, cl::init(128),
                     cl::desc("Optimize the memop size <= this value"));
 
+#if defined(ENABLE_ACPO)
 cl::opt<bool>
     EnableAI4CMEMOP("enable-ai4c-memop", cl::init(false), cl::Hidden,
                     cl::desc("Leverage AOT ML model to optimize memop."));
@@ -226,6 +230,7 @@ SmallVector<uint64_t, 16> getACPOAdvice(Function *F,
 
   return SizeIds;
 }
+#endif
 
 namespace {
 
@@ -308,11 +313,18 @@ struct MemOp {
 
 class MemOPSizeOpt : public InstVisitor<MemOPSizeOpt> {
 public:
+#if defined(ENABLE_ACPO)
+   MemOPSizeOpt(Function &Func, BlockFrequencyInfo &BFI,
+                OptimizationRemarkEmitter &ORE, DominatorTree *DT,
+                TargetLibraryInfo &TLI, ModelDataAI4CMemOPCollector &MDC)
+       : Func(Func), BFI(BFI), ORE(ORE), DT(DT), TLI(TLI), MDC(MDC),
+         Changed(false) {
+#else
   MemOPSizeOpt(Function &Func, BlockFrequencyInfo &BFI,
                OptimizationRemarkEmitter &ORE, DominatorTree *DT,
-               TargetLibraryInfo &TLI, ModelDataAI4CMemOPCollector &MDC)
-      : Func(Func), BFI(BFI), ORE(ORE), DT(DT), TLI(TLI), MDC(MDC),
-        Changed(false) {
+               TargetLibraryInfo &TLI)
+      : Func(Func), BFI(BFI), ORE(ORE), DT(DT), TLI(TLI), Changed(false) {
+#endif // Enable_ACPO {
     ValueDataArray =
         std::make_unique<InstrProfValueData[]>(INSTR_PROF_NUM_BUCKETS);
   }
@@ -360,8 +372,10 @@ private:
   // The space to read the profile annotation.
   std::unique_ptr<InstrProfValueData[]> ValueDataArray;
   bool perform(MemOp MO);
+#if defined(ENABLE_ACPO)
   std::vector<std::vector<std::string>> Records;
   ModelDataAI4CMemOPCollector &MDC;
+#endif
 };
 
 static bool isProfitable(uint64_t Count, uint64_t TotalCount) {
@@ -403,12 +417,14 @@ bool MemOPSizeOpt::perform(MemOp MO) {
   SmallVector<InstrProfValueData, 24> RemainingVDs;
   uint64_t SumForOpt;
   const char *op_name = MO.getName(TLI);
+#if defined(ENABLE_ACPO)
   if (EnableAI4CMEMOP) {
     MDC.collectFeatures(&Func, MO.I, op_name);
     SizeIds = getACPOAdvice(MO.I->getFunction(), &MDC);
     if (!SizeIds.size())
       return false;
   } else {
+#endif    
     if (!getValueProfDataFromInst(*MO.I, IPVK_MemOPSize, MaxNumVals,
                                   ValueDataArray.get(), NumVals, TotalCount)) {
       return false;
@@ -502,7 +518,9 @@ bool MemOPSizeOpt::perform(MemOp MO) {
     LLVM_DEBUG(dbgs() << "Optimize one memory intrinsic call to " << Version
                       << " Versions (covering " << SumForOpt << " out of "
                       << TotalCount << ")\n");
+#if defined(ENABLE_ACPO)
   }
+#endif
   
   // mem_op(..., size)
   // ==>
@@ -609,16 +627,26 @@ bool MemOPSizeOpt::perform(MemOp MO) {
 }
 } // namespace
 
+#if defined(ENABLE_ACPO)
+ static bool PGOMemOPSizeOptImpl(Function &F, BlockFrequencyInfo &BFI,
+                                 OptimizationRemarkEmitter &ORE,
+                                 DominatorTree *DT, TargetLibraryInfo &TLI,
+                                 ModelDataAI4CMemOPCollector &MDC) {
+#else
 static bool PGOMemOPSizeOptImpl(Function &F, BlockFrequencyInfo &BFI,
                                 OptimizationRemarkEmitter &ORE,
-                                DominatorTree *DT, TargetLibraryInfo &TLI,
-                                ModelDataAI4CMemOPCollector &MDC) {
+                                DominatorTree *DT, TargetLibraryInfo &TLI) {
+#endif // ENABLE_ACPO
   if (DisableMemOPOPT)
     return false;
 
   if (F.hasFnAttribute(Attribute::OptimizeForSize))
     return false;
+#if defined(ENABLE_ACPO)
   MemOPSizeOpt MemOPSizeOpt(F, BFI, ORE, DT, TLI, MDC);
+#else
+  MemOPSizeOpt MemOPSizeOpt(F, BFI, ORE, DT, TLI);
+#endif
   MemOPSizeOpt.perform();
   return MemOPSizeOpt.isChanged();
 }
@@ -629,12 +657,16 @@ PreservedAnalyses PGOMemOPSizeOpt::run(Function &F,
   auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
   auto *DT = FAM.getCachedResult<DominatorTreeAnalysis>(F);
   auto &TLI = FAM.getResult<TargetLibraryAnalysis>(F);
-  std::error_code EC;
-  raw_fd_ostream RawOS(MemOPDumpFile.getValue(), EC, sys::fs::CD_OpenAlways,
-                       sys::fs::FA_Write, sys::fs::OF_Append);
-  formatted_raw_ostream OS(RawOS);
-  ModelDataAI4CMemOPCollector MDC(OS, MemOPDumpFile, &FAM);
-  bool Changed = PGOMemOPSizeOptImpl(F, BFI, ORE, DT, TLI, MDC);
+#if defined(ENABLE_ACPO)
+   std::error_code EC;
+   raw_fd_ostream RawOS(MemOPDumpFile.getValue(), EC, sys::fs::CD_OpenAlways,
+                        sys::fs::FA_Write, sys::fs::OF_Append);
+   formatted_raw_ostream OS(RawOS);
+   ModelDataAI4CMemOPCollector MDC(OS, MemOPDumpFile, &FAM);
+   bool Changed = PGOMemOPSizeOptImpl(F, BFI, ORE, DT, TLI, MDC);
+#else
+  bool Changed = PGOMemOPSizeOptImpl(F, BFI, ORE, DT, TLI);
+#endif
   if (!Changed)
     return PreservedAnalyses::all();
   auto PA = PreservedAnalyses();

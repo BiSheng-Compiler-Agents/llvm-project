@@ -7,7 +7,7 @@
 // Copyright (C) 2025. Huawei Technologies Co., Ltd. All rights reserved.
 //
 //===------------------------------------------------------------------------===//
-
+#if defined(ENABLE_ACPO)
 #ifndef LLVM_TRANSFORM_UTILS_ACPOBRANCHWEIGHTMODEL_H
 #define LLVM_TRANSFORM_UTILS_ACPOBRANCHWEIGHTMODEL_H
 
@@ -28,3 +28,4 @@ private:
 }
 
 #endif //LLVM_TRANSFORM_UTILS_ACPOBRANCHWEIGHTMODEL_H
+#endif // ENABLE_ACPO

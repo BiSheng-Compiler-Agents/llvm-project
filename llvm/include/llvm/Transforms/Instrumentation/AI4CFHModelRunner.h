@@ -1,3 +1,5 @@
+#if defined(ENABLE_ACPO)
+
 #ifdef LLVM_HAVE_TF_AOT_AI4CFHCOMPILEDMODEL
 
 #ifndef LLVM_ANALYSIS_AI4CFHMODELRUNNER_H
@@ -71,3 +73,4 @@ public:
 
 #endif
 #endif
+#endif // Enable_ACPO

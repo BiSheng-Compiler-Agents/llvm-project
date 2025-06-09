@@ -9,6 +9,7 @@
 // This file implement AOT ML model to decide function hotness
 //
 //===----------------------------------------------------------------------===//
+#if defined(ENABLE_ACPO)
 
 #include "llvm/Transforms/Instrumentation/AI4CAnalysis.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
@@ -152,3 +153,4 @@ PreservedAnalyses  AI4CAnalysis::run(Module &M, ModuleAnalysisManager &MAM) {
     return PreservedAnalyses::all();
   }
 }
+#endif //Enable_ACPO

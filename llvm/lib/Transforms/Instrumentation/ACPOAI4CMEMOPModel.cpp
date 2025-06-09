@@ -1,3 +1,5 @@
+#if defined(ENABLE_ACPO)
+
 #include "llvm/Transforms/Instrumentation/ACPOAI4CMEMOPModel.h"
 
 using namespace llvm;
@@ -37,3 +39,4 @@ std::unique_ptr<ACPOAdvice> ACPOAI4CMEMOPModel::getAdviceML() {
 std::unique_ptr<ACPOAdvice> ACPOAI4CMEMOPModel::getAdviceNoML() {
   return nullptr;
 }
+#endif //Enable_ACPO

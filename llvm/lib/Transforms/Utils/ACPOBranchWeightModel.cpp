@@ -11,6 +11,7 @@
 // This pass adds the branch weight metadata.
 //
 //===----------------------------------------------------------------------===//
+#if defined(ENABLE_ACPO)
 
 #include "llvm/Transforms/Utils/ACPOBranchWeightModel.h"
 #include "llvm/Analysis/ACPOBWModel.h"
@@ -225,3 +226,4 @@ PreservedAnalyses ACPOBranchWeightModelPass::run(Module &M, ModuleAnalysisManage
     return PreservedAnalyses::none();
   }
 }
+#endif // ENABLE_ACPO
