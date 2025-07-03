@@ -1,0 +1,3 @@
+[submodule "llvm/lib/IR2Vec"]
+	path = llvm/lib/IR2Vec
+	url = https://github.com/BiSheng-Compiler-Agents/IR2Vec

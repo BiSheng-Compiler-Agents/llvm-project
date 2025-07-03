@@ -282,7 +282,13 @@ public:
       if (shareModule())
         writeModule(M);
       else {
-        auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, 300);
+        auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
+        LLVM_DEBUG(
+            dbgs() << "IR2Vec embedding: ";
+            for (double i : ir2vec.getProgramVector()) {
+              dbgs() << i << ' ';
+            }
+            dbgs() << '\n';);
         writeFeatures(FinalFeatures, ir2vec.getProgramVector());
       }
     }

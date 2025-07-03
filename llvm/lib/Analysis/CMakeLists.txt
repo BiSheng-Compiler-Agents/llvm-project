@@ -28,18 +28,6 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
       )
     endforeach()
   endif()
-  if (DEFINED LLVM_HAVE_TF_AOT)
-    tf_find_and_compile(
-      ${LLVM_INLINER_MODEL_PATH}
-      ${LLVM_INLINER_MODEL_CURRENT_URL}
-      ${LLVM_INLINER_MODEL_PATH_DEFAULT}
-      "models/gen-inline-oz-test-model.py"
-      serve
-      action
-      InlinerSizeModel
-      llvm::InlinerSizeModel
-    )
-  endif()
 
   if (LLVM_HAVE_TFLITE)
     list(APPEND MLLinkDeps
