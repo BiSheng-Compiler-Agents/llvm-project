@@ -14,7 +14,8 @@
 
 #include "llvm/Analysis/ACPOMLInterface.h"
 #include "llvm/Analysis/ACPOModelRunner.h"
-#include "llvm/Analysis/IR2ScoreModelRunner.h"
+#include "llvm/Analysis/IR2ScoreIR2VecModelRunner.h"
+#include "llvm/Analysis/IR2ScoreProteanModelRunner.h"
 #include "llvm/Analysis/TensorSpec.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Process.h"
@@ -1464,18 +1465,32 @@ std::shared_ptr<ACPOMLInterface> llvm::createPersistentCompiledMLIF() {
 
 #ifdef LLVM_HAVE_TF_AOT_IR2SCORECOMPILEDMODEL
 std::unique_ptr<ACPOModelRunner>
-createIR2Score(std::vector<std::pair<std::string, std::string>> Inputs,
-               StringRef Decision) {
+createIR2ScoreIr2vec(std::vector<std::pair<std::string, std::string>> Inputs,
+                     StringRef Decision) {
   // PLACEHOLDER
   LLVMContext Ctx;
   return std::make_unique<IR2ScoreModelRunner>(Ctx, Inputs, Decision);
 }
+
+#ifdef LLVM_HAVE_TF_AOT_IR2SCOREPROTEANCOMPILEDMODEL
+std::unique_ptr<ACPOModelRunner>
+createIR2ScoreProtean(std::vector<std::pair<std::string, std::string>> Inputs,
+                      StringRef Decision) {
+  // PLACEHOLDER
+  LLVMContext Ctx;
+  return std::make_unique<ProteanModelRunner>(Ctx, Inputs, Decision);
+}
+#endif
 
 // Generate map using ifdefs for now, in the future we could have this
 // automatically populate using macros
 const std::unordered_map<std::string,
                          ACPOMLCPPInterface::CreateModelRunnerFunction>
     ACPOMLCPPInterface::CreateModelRunnerMap = {
-        {"IR2SCORE", createIR2Score},
+#ifdef LLVM_HAVE_TF_AOT_IR2SCORECOMPILEDMODEL
+        {"IR2SCOREIR2VEC", createIR2ScoreIr2vec},
+#endif
+#ifdef LLVM_HAVE_TF_AOT_IR2SCOREPROTEANCOMPILEDMODEL
+        {"IR2SCOREPROTEAN", createIR2ScoreProtean},
 #endif
 };

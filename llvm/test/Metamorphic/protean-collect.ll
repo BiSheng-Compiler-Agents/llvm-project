@@ -1,7 +1,5 @@
-; REQUIRES: enable_bspriv_common_acpo
-; REQUIRES: enable_bspriv_protean
 ; REQUIRES: asserts
-; RUN: env BISHENG_ACPO_DIR=%p/../../../acpo protean -protean -passes=verify -debug-only=protean -o %t.bc %s 2>&1 | FileCheck %s
+; RUN: env PROTEAN_DIR=%p/../../../acpo protean -protean -passes=verify -debug-only=protean -o %t.bc %s 2>&1 | FileCheck %s
 
 @.str = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 

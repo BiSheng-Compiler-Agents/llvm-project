@@ -371,12 +371,12 @@ static cl::opt<bool> ProteanOutputTable(
 static cl::opt<bool>
     UseProteanCollect("use-protean-collect",
                       cl::desc("Use protean collect features for IR Analyzer"),
-                      cl::init(true));
+                      cl::init(false));
 
 static cl::opt<bool>
     ModLevelIPC("module-level-ipc",
                 cl::desc("Enable IPC for module level shared memory"),
-                cl::init(true));
+                cl::init(false));
 
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
@@ -907,8 +907,8 @@ int main(int argc, char **argv) {
       if (!Recipes.empty())
         Pipeline += ",";
       Pipeline += Recipes;
+      Pipeline += ",protean-collect-features";
       if (UseProteanCollect) {
-        Pipeline += ",protean-collect-features";
         LLVM_DEBUG(dbgs() << "ProteanCollectFeature Pass is enabled! " << "\n");
       }
       LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");

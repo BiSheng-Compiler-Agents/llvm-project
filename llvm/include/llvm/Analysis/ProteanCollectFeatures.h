@@ -28,6 +28,9 @@
 #include <unordered_map>
 #include <vector>
 
+const int IR2VEC_DIMENSION = 300;
+const int IR2VEC_EMBEDDING_SIZE = IR2VEC_DIMENSION * sizeof(double);
+
 namespace llvm {
 class LPMUpdater;
 class Loop;
