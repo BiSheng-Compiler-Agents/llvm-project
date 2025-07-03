@@ -202,7 +202,7 @@ int createSharedMemory(const char *shm_name, size_t shm_size,
   header->dataSize = shm_size - sizeof(SharedMemoryData);
   header->ModLevelIPC = ModLevelIPC;
   header->dataOffset = sizeof(SharedMemoryData);
-  header->ir2vec_dimension = IR2VEC_DIMENTION;
+  header->ir2vec_dimension = IR2VEC_DIMENSION;
 
   close(shm_fd);
   return 0;
@@ -270,97 +270,100 @@ readModuleFromSharedMemory(const char *shm_name, llvm::LLVMContext &Context) {
 }
 
 void readFeaturesFromSharedMemory(
-    const char *shm_name,
+    const char *ShmName,
     std::vector<std::pair<std::string, std::string>> &Features) {
-  int shm_fd = shm_open(shm_name, O_RDWR, 0666);
-  if (shm_fd == -1) {
+  int ShmFD = shm_open(ShmName, O_RDWR, 0666);
+  if (ShmFD == -1) {
     perror("shm_open");
     return;
   }
 
-  SharedMemoryData *shared_data =
+  SharedMemoryData *SharedData =
       (SharedMemoryData *)mmap(nullptr, sizeof(SharedMemoryData),
-                               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-  if (shared_data == MAP_FAILED) {
+                               PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
+  if (SharedData == MAP_FAILED) {
     perror("mmap (reader)");
-    close(shm_fd);
+    close(ShmFD);
     return;
   }
-  size_t shm_size = sizeof(SharedMemoryData) + shared_data->dataSize;
+  size_t ShmSize = sizeof(SharedMemoryData) + SharedData->dataSize;
 
-  munmap(shared_data, 0);
-  shared_data = (SharedMemoryData *)mmap(
-      nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-  if (shared_data == MAP_FAILED) {
+  munmap(SharedData, 0);
+  SharedData = (SharedMemoryData *)mmap(
+      nullptr, ShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
+  if (SharedData == MAP_FAILED) {
     perror("mmap (remap reader)");
     return;
   }
 
-  char *ptr = (char *)shared_data + shared_data->dataOffset + IR2VEC_EMBEDDING_SIZE;
-  char *end_ptr = (char *)shared_data + shm_size;
+  char *Ptr =
+      (char *)SharedData + SharedData->dataOffset + IR2VEC_EMBEDDING_SIZE;
+  char *EndPtr = (char *)SharedData + ShmSize;
 
-  for (size_t i = 0; i < shared_data->featureCount; ++i) {
-    size_t keySize = strlen(ptr) + 1;
-    std::string key(ptr);
-    ptr += keySize;
+  for (size_t i = 0; i < SharedData->featureCount; ++i) {
+    size_t KeySize = strlen(Ptr) + 1;
+    std::string Key(Ptr);
+    Ptr += KeySize;
 
-    if (ptr + sizeof(float) > end_ptr) {
+    if (Ptr + sizeof(float) > EndPtr) {
       llvm::errs() << "Buffer overflow prevented while copying value for key\n";
       break;
     }
-    float floatValue;
-    memcpy(&floatValue, ptr, sizeof(float));
-    ptr += sizeof(float);
+    float FloatValue;
+    memcpy(&FloatValue, Ptr, sizeof(float));
+    Ptr += sizeof(float);
 
     std::stringstream ss;
-    ss << std::fixed << std::setprecision(6) << floatValue;
-    std::string value = ss.str();
+    ss << std::fixed << std::setprecision(6) << FloatValue;
+    std::string Value = ss.str();
 
-    Features.push_back(std::make_pair(key, value));
+    Features.push_back(std::make_pair(Key, Value));
   }
 
-  munmap(shared_data, shm_size);
-  close(shm_fd);
+  munmap(SharedData, ShmSize);
+  close(ShmFD);
 }
 
 void readIR2VecFromSharedMemory(
-    const char *shm_name,
+    const char *ShmName,
     std::vector<std::pair<std::string, std::string>> &Features) {
-  int shm_fd = shm_open(shm_name, O_RDWR, 0666);
-  if (shm_fd == -1) {
+  int ShmFD = shm_open(ShmName, O_RDWR, 0666);
+  if (ShmFD == -1) {
     perror("shm_open");
     return;
   }
 
-  SharedMemoryData *shared_data =
+  SharedMemoryData *SharedData =
       (SharedMemoryData *)mmap(nullptr, sizeof(SharedMemoryData),
-                               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-  if (shared_data == MAP_FAILED) {
+                               PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
+  if (SharedData == MAP_FAILED) {
     perror("mmap (reader)");
-    close(shm_fd);
+    close(ShmFD);
     return;
   }
-  size_t shm_size = sizeof(SharedMemoryData) + shared_data->dataSize;
+  size_t ShmSize = sizeof(SharedMemoryData) + SharedData->dataSize;
 
-  munmap(shared_data, 0);
-  shared_data = (SharedMemoryData *)mmap(
-      nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-  if (shared_data == MAP_FAILED) {
+  munmap(SharedData, 0);
+  SharedData = (SharedMemoryData *)mmap(
+      nullptr, ShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
+  if (SharedData == MAP_FAILED) {
     perror("mmap (remap reader)");
     return;
   }
 
-  double *ptr = (double *)((char *)shared_data + shared_data->dataOffset);
+  double *Ptr = (double *)((char *)SharedData + SharedData->dataOffset);
 
-  for (size_t i = 0; i < IR2VEC_DIMENTION; ++i) {
-    double value;
-    memcpy(&value, ptr, sizeof(double));
-    ptr += 1; // pointer arithmetic on double ptrs automatically works
-    Features.push_back(std::make_pair("IR2Vec_" + std::to_string(i + 1), std::to_string(static_cast<float>(value))));
+  for (size_t I = 0; I < IR2VEC_DIMENSION; ++I) {
+    double Value;
+    memcpy(&Value, Ptr, sizeof(double));
+    Ptr += 1; // pointer arithmetic on double ptrs automatically works
+    Features.push_back(
+        std::make_pair("IR2Vec_" + std::to_string(I + 1),
+                       std::to_string(static_cast<float>(Value))));
   }
 
-  munmap(shared_data, shm_size);
-  close(shm_fd);
+  munmap(SharedData, ShmSize);
+  close(ShmFD);
 }
 
 void cleanupSharedMemory(const char *shm_name, size_t shm_size,
@@ -379,8 +382,8 @@ void SimulatedAnnealingProtean::run() {
 
   llvm::LLVMContext Context;
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
-      std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel);
-  IRModel->setProteanCollect(UseProteanCollect);
+      std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel, nullptr,
+                                            true, UseProteanCollect);
 
   std::unordered_set<std::string> ExploredRecipes;
   for (int Iteration = 0; Iteration < this->MaxIterations; ++Iteration) {
@@ -554,7 +557,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     return -1;
   }
 
-  const char *shm_name = "/shm";
+  const char *ShmName = "/shm";
 
   if (ModLevelIPC) {
     // Read the module from memory
@@ -568,7 +571,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
 
     LLVM_DEBUG(llvm::dbgs() << "Parsing module\n");
     llvm::Expected<std::unique_ptr<llvm::Module>> moduleOrErr =
-        readModuleFromSharedMemory(shm_name, Context);
+        readModuleFromSharedMemory(ShmName, Context);
 
     if (moduleOrErr) {
       M = std::move(moduleOrErr.get());
@@ -589,7 +592,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
       MDC.collectFeatures(M);
       Features = MDC.getFeatures();
     } else {
-      auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENTION);
+      auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
       IR2Vec::Vector prgmVec = ir2vec.getProgramVector();
       for (int i = 0; i < prgmVec.size(); ++i) {
         std::string Feature = "IR2Vec_";
@@ -598,21 +601,22 @@ double SimulatedAnnealingProtean::irAnalysisCost(
       }
     }
   } else {
-    // TODO update both these methods
     if (UseProteanCollect) {
-      readFeaturesFromSharedMemory(shm_name, Features);
+      readFeaturesFromSharedMemory(ShmName, Features);
     } else {
-      readIR2VecFromSharedMemory(shm_name, Features);
+      readIR2VecFromSharedMemory(ShmName, Features);
     }
   }
 
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
-      std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel);
-  IRModel->setProteanCollect(UseProteanCollect);
+      std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel, nullptr,
+                                            true, UseProteanCollect);
   IRModel->setMLCustomFeatures(Features);
   std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();
   if (!Score) {
     LLVM_DEBUG(llvm::dbgs() << "Score is null\n");
+    llvm::errs() << "Model is null, please recompile with correct model specified\n";
+    return -1;
   } else {
     LLVM_DEBUG(llvm::dbgs() << "Score is not null\n");
   }

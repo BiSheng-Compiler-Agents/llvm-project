@@ -23,9 +23,10 @@ class ACPOmodel;
 
 class IR2ScoreModel : public ACPOModel {
 public:
-  bool UseProteanCollect = false;
+  bool UseProteanCollect;
   IR2ScoreModel(LLVMContext *Context, bool UseAOT = true,
-                OptimizationRemarkEmitter *ORE = NULL, bool UseML = true);
+                OptimizationRemarkEmitter *ORE = NULL, bool UseML = true,
+                bool UseProteanCollect = false);
 
   ~IR2ScoreModel();
 
@@ -35,8 +36,6 @@ public:
   void sendCustomFeatures() override;
 
   void setContext(LLVMContext *Context);
-
-  void setProteanCollect(bool ProteanCollect);
 
   size_t getModelFeaturesSize();
 

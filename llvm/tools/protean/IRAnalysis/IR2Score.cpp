@@ -21,8 +21,9 @@ using namespace llvm;
 #define DEBUG_TYPE "ir2score"
 
 IR2ScoreModel::IR2ScoreModel(LLVMContext *Context, bool UseAOT,
-                             OptimizationRemarkEmitter *ORE, bool UseML)
-    : ACPOModel(ORE, UseML) {
+                             OptimizationRemarkEmitter *ORE, bool UseML,
+                             bool UseProteanCollect)
+    : ACPOModel(ORE, UseML), UseProteanCollect(UseProteanCollect) {
   setContextPtr(Context);
   if (UseAOT) {
     setMLIF(createPersistentCompiledMLIF());
@@ -45,11 +46,11 @@ void IR2ScoreModel::setContext(LLVMContext *Context) { setContextPtr(Context); }
 void IR2ScoreModel::sendCustomFeatures() {
   // Get an ACPOMLInterface to communicate with the Python side
   std::shared_ptr<ACPOMLInterface> MLIF = getMLIF();
-  MLIF->initializeFeatures("IR2SCORE", CustomFeatureValues);
-}
-
-void IR2ScoreModel::setProteanCollect(bool ProteanCollect) {
-  UseProteanCollect = ProteanCollect;
+  if (UseProteanCollect) {
+    MLIF->initializeFeatures("IR2SCOREPROTEAN", CustomFeatureValues);
+  } else {
+    MLIF->initializeFeatures("IR2SCOREIR2VEC", CustomFeatureValues);
+  }
 }
 
 size_t IR2ScoreModel::getModelFeaturesSize() {
@@ -74,12 +75,15 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
 
   std::string ModelFile;
   std::string OutputName;
+  std::string ModelName;
   if (UseProteanCollect) {
     ModelFile = "model-ir2scoreprotean.acpo";
     OutputName = "IRSCOREPROTEAN";
+    ModelName = "IR2SCOREPROTEAN";
   } else {
     ModelFile = "model-ir2scoreir2vec.acpo";
     OutputName = "IRSCORE";
+    ModelName = "IR2SCOREIR2VEC";
   }
   LLVM_DEBUG(llvm::dbgs() << "Loading model from IR2ScoreModel..\n");
   if (!MLIF->loadModel(ModelFile)) {
@@ -90,14 +94,14 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
     return NULL;
   }
   LLVM_DEBUG(llvm::dbgs() << "Loading features for IR2ScoreModel..\n");
-  if (!MLIF->initializeFeatures("IR2SCORE", CustomFeatureValues)) {
+  if (!MLIF->initializeFeatures(ModelName, CustomFeatureValues)) {
     LLVM_DEBUG(llvm::dbgs()
                << "Features not initialized. "
                << "Did you export BISHENG_ACPO_DIR to $LLVM_DIR/acpo ?\n"
                << "Falling back to default advisor. \n");
     return NULL;
   }
-  bool ModelRunOK = MLIF->runModel("IR2SCORE");
+  bool ModelRunOK = MLIF->runModel(ModelName);
   assert(ModelRunOK);
   float IRScore = MLIF->getModelResultF(OutputName);
   LLVM_DEBUG(llvm::dbgs() << "Found IRScore: " << IRScore << '\n');
