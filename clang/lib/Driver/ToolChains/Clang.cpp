@@ -64,6 +64,8 @@
 #include "llvm/TargetParser/RISCVTargetParser.h"
 #include <cctype>
 
+#include <iostream>
+
 using namespace clang::driver;
 using namespace clang::driver::tools;
 using namespace clang;
@@ -9186,6 +9188,13 @@ void ProteanSAOptimizer::ConstructJob(Compilation &C, const JobAction &JA,
   // Forward `-mllvm` arguments to the LLVM invocations if present.
   for (Arg *A : TCArgs.filtered(options::OPT_mllvm)) {
     CmdArgs.push_back(A->getValue());
+    A->claim();
+  }
+
+  for (Arg *A : TCArgs.filtered(options::OPT_Protean_COMMA)) {
+    for (const char *value : A->getValues()) {
+      CmdArgs.push_back(value);
+    }
     A->claim();
   }
 
