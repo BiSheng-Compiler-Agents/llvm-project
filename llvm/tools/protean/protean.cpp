@@ -366,7 +366,7 @@ static cl::opt<IRCostFunction> CostType(
 static cl::opt<bool> ProteanOutputTable(
     "protean-output-table",
     cl::desc("Output Table of Simulated Annealing information"),
-    cl::init(true));
+    cl::init(false));
 
 static cl::opt<bool>
     UseProteanCollect("use-protean-collect",
