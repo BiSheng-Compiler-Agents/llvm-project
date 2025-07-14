@@ -26,6 +26,7 @@ enum ClangFlags {
   LinkOption = (1 << 8),
   Ignored = (1 << 9),
   TargetSpecific = (1 << 10),
+  ProteanInput = (1 << 12),
 };
 
 // Flags specifically for clang option visibility. We alias DefaultVis to

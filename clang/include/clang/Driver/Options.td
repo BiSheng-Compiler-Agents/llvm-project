@@ -42,6 +42,9 @@ def NoXarchOption : OptionFlag;
 // LinkerInput - The option is a linker input.
 def LinkerInput : OptionFlag;
 
+// ProteanInput - The option is a protean input.
+def ProteanInput : OptionFlag;
+
 // NoArgumentUnused - Don't report argument unused warnings for this option; this
 // is useful for options like -static or -dynamic which a user may always end up
 // passing, even if the platform defaults to (or only supports) that option.
@@ -274,6 +277,8 @@ def gfortran_Group : OptionGroup<"<gfortran group>">,
                      DocName<"Fortran compilation options">, DocBrief<[{
 Flags that will be passed onto the ``gfortran`` compiler when Clang is given
 a Fortran input.}]>;
+
+def Protean_Group : OptionGroup<"<protean group>">, DocName<"Protean Options">, DocBrief<[{Flags that are passed onto protean}]>;
 
 def Link_Group : OptionGroup<"<T/e/s/t/u group>">, DocName<"Linker options">,
                  DocBrief<[{Flags that are passed on to the linker}]>;
@@ -995,6 +1000,10 @@ def Wl_COMMA : CommaJoined<["-"], "Wl,">, Visibility<[ClangOption, FlangOption]>
   Flags<[LinkerInput, RenderAsInput]>,
   HelpText<"Pass the comma separated arguments in <arg> to the linker">,
   MetaVarName<"<arg>">, Group<Link_Group>;
+def Protean_COMMA : CommaJoined<["-"], "Wprotean,">, Visibility<[ClangOption, FlangOption]>,
+  Flags<[ProteanInput, RenderAsInput]>,
+  HelpText<"Pass the comma separated arguments in <arg> to protean">,
+  MetaVarName<"<arg>">, Group<Protean_Group>;
 // FIXME: This is broken; these should not be Joined arguments.
 def Wno_nonportable_cfstrings : Joined<["-"], "Wno-nonportable-cfstrings">, Group<W_Group>,
   Visibility<[ClangOption, CC1Option]>;
