@@ -138,6 +138,7 @@ public:
     Loop,
     CallGraph,
     CallSite,
+    CallSiteThreshold,
     NumOfScope,
   };
 
@@ -154,6 +155,7 @@ public:
     FPIRelated,
     HotColdCallSite,
     InlineCostFeatureGroup,
+    ThresholdFeatureGroup,
     ProteanFIExtendedFeatures,
     LoopInstFeatures,
     TripCountFeatures,
@@ -187,6 +189,7 @@ public:
     JumpTablePenalty,
     CaseClusterPenalty,
     SwitchPenalty,
+    SwitchDefaultDestPenalty,
     UnsimplifiedCommonInstructions,
     NumLoops,
     DeadBlocks,
