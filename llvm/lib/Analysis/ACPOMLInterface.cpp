@@ -1112,6 +1112,11 @@ bool ACPOMLCPPInterface::initializeFeatures(
     return false;
   }
   auto FilteredFeatures = filterFeatures(FeatureValues, Find->second);
+  LLVM_DEBUG(
+  for (auto P : FilteredFeatures)
+    llvm::dbgs() << "{" << P.first << ", " << P.second << "}";
+  llvm::dbgs() << "\n"
+  );
   if (FilteredFeatures.size() != Find->second->getNumFeatures()) {
     LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid features\n");
     return false;
@@ -1159,6 +1164,11 @@ bool ACPOMLCPPInterface::initializeFeatures(
     return false;
   }
   auto FilteredFeatures = filterFeatures(FeatureValues, Find->second);
+  LLVM_DEBUG(
+  for (auto P : FilteredFeatures)
+    llvm::dbgs() << "{" << P.first << ", " << P.second << "}";
+  llvm::dbgs() << "\n"
+  );
   if (FilteredFeatures.size() != Find->second->getNumFeatures()) {
     LLVM_DEBUG(dbgs() << "ERROR in initializeFeatures: Invalid features\n");
     return false;
