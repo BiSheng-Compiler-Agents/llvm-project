@@ -790,8 +790,8 @@ int main(int argc, char **argv) {
     // At the end of the Simulated Annealing loop the parent process will just
     // exit/return from here.
     if (UseProteanInitialPasses.getValue()) {
-      dbgs() << "Beginning Simulated Annealing For Module " << M->getName()
-             << "\n";
+      LLVM_DEBUG(dbgs() << "ProteanCompiler :: Beginning Simulated Annealing for Module "
+             << M->getName() << "\n");
       std::string Recipes;
       if (OutputFilename == "-") {
         errs() << "Specify an output.o file with -o (e.g., -o output.bc) to "
@@ -822,7 +822,9 @@ int main(int argc, char **argv) {
 
       SAProtean.run();
       if (SAProtean.getFinished()) {
-        LLVM_DEBUG(dbgs() << "Simulated Annealing finished running. ");
+        LLVM_DEBUG(dbgs() << "ProteanCompiler :: Simulated Annealing finished running for "
+                  "Module "
+               << M->getName() << "\n");
         LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
                           << PhaseOrderGeneratorBase::recipesToPasses(
                                  SAProtean.getFinalState(), PassMap)

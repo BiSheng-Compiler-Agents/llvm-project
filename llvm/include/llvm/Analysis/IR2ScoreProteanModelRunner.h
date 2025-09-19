@@ -17,7 +17,7 @@
 #include "llvm/Analysis/AOTModelRunner.h"
 #include "llvm/Analysis/IR2SCOREPROTEANCompiledModel.h"
 
-#define IRSCORE_PROTEAN "IRSCOREPROTEAN"
+#define IRSCORE "IRSCORE"
 
 namespace llvm {
 
@@ -125,7 +125,7 @@ public:
   }
 
   float getModelResultF(std::string OutputName) override {
-    if (OutputName == IRSCORE_PROTEAN) {
+    if (OutputName == IRSCORE) {
       void *ResultUntyped = CompiledModel->result_fetch_output_0_data();
       float *Result = reinterpret_cast<float *>(ResultUntyped);
       return *Result;

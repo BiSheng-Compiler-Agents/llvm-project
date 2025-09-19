@@ -47,4 +47,4 @@ attributes #1 = { nounwind }
 
 ; CHECK: Beginning Simulated Annealing
 ; CHECK: Recipe changed
-; CHECK: Cost is not null
+; CHECK: Cost returned as
