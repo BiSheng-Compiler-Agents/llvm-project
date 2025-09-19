@@ -48,5 +48,5 @@ attributes #1 = { nounwind cold readnone uwtable }
 ; Diff between the bc files generated and the log files generated.
 ; Should be no difference between these files since protean is deterministic
 
-; RUN: llvm-diff %t0 %t1 
-; RUN: diff %t0.log %t1.log 
+; RUN: llvm-diff %t0 %t1
+; RUN: diff %t0.log %t1.log

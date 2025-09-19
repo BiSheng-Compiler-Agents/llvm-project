@@ -78,17 +78,17 @@ std::unique_ptr<ACPOAdvice> IR2ScoreModel::getAdviceML() {
   std::string ModelName;
   if (UseProteanCollect) {
     ModelFile = "model-ir2scoreprotean.acpo";
-    OutputName = "IRSCOREPROTEAN";
+    OutputName = "IRSCORE";
     ModelName = "IR2SCOREPROTEAN";
   } else {
     ModelFile = "model-ir2scoreir2vec.acpo";
     OutputName = "IRSCORE";
     ModelName = "IR2SCOREIR2VEC";
   }
-  LLVM_DEBUG(llvm::dbgs() << "Loading model from IR2ScoreModel..\n");
+  LLVM_DEBUG(llvm::dbgs() << "Loading " << ModelName << " Model..\n");
   if (!MLIF->loadModel(ModelFile)) {
     LLVM_DEBUG(llvm::dbgs()
-               << "Model not loaded. "
+               << "IR2SCORE Model not loaded. "
                << "Did you export BISHENG_ACPO_DIR to $LLVM_DIR/acpo ?\n"
                << "Falling back to default advisor. \n");
     return NULL;

@@ -87,7 +87,7 @@ extern llvm::cl::opt<std::string> ProteanLoopModelFile;
 extern llvm::cl::opt<bool> UseProteanInitialPasses;
 using namespace LoopTools;
 namespace llvm {
-static cl::opt<bool> FeatureDump("enable-protean-feature-dump", cl::init(true));
+static cl::opt<bool> FeatureDump("enable-protean-feature-dump", cl::init(false));
 static cl::opt<bool> EnableLoopCollectFeature("enable-loop-collect-feature",
                                               cl::init(false));
 
@@ -523,6 +523,10 @@ calculateMandatoryOnly(ProteanCollectFeatures &ACF,
 static void
 calculateInlineCostFeatures(ProteanCollectFeatures &ACF,
                             const ProteanCollectFeatures::FeatureInfo &Info);
+
+static void calculateThreshold(ProteanCollectFeatures &ACF,
+                               const ProteanCollectFeatures::FeatureInfo &Info);
+
 static void calculateProteanFIExtendedFeaturesFeatures(
     ProteanCollectFeatures &ACF,
     const ProteanCollectFeatures::FeatureInfo &Info);
@@ -603,6 +607,7 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
         REGISTER_NAME(JumpTablePenalty, "jump_table_penalty"),
         REGISTER_NAME(CaseClusterPenalty, "case_cluster_penalty"),
         REGISTER_NAME(SwitchPenalty, "switch_penalty"),
+        REGISTER_NAME(SwitchDefaultDestPenalty, "switch_default_dest_penalty"),
         REGISTER_NAME(UnsimplifiedCommonInstructions,
                       "unsimplified_common_instructions"),
         REGISTER_NAME(NumLoops, "num_loops"),
@@ -740,6 +745,7 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_SCOPE(JumpTablePenalty, CallSite),
         REGISTER_SCOPE(CaseClusterPenalty, CallSite),
         REGISTER_SCOPE(SwitchPenalty, CallSite),
+        REGISTER_SCOPE(SwitchDefaultDestPenalty, CallSite),
         REGISTER_SCOPE(UnsimplifiedCommonInstructions, CallSite),
         REGISTER_SCOPE(NumLoops, CallSite),
         REGISTER_SCOPE(DeadBlocks, CallSite),
@@ -752,7 +758,7 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_SCOPE(IsMultipleBlocks, CallSite),
         REGISTER_SCOPE(NestedInlines, CallSite),
         REGISTER_SCOPE(NestedInlineCostEstimate, CallSite),
-        REGISTER_SCOPE(Threshold, CallSite),
+        REGISTER_SCOPE(Threshold, CallSiteThreshold),
         REGISTER_SCOPE(BasicBlockCount, Function),
         REGISTER_SCOPE(BlocksReachedFromConditionalInstruction, Function),
         REGISTER_SCOPE(Uses, Function),
@@ -862,6 +868,7 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_GROUP(JumpTablePenalty, InlineCostFeatureGroup),
         REGISTER_GROUP(CaseClusterPenalty, InlineCostFeatureGroup),
         REGISTER_GROUP(SwitchPenalty, InlineCostFeatureGroup),
+        REGISTER_GROUP(SwitchDefaultDestPenalty, InlineCostFeatureGroup),
         REGISTER_GROUP(UnsimplifiedCommonInstructions, InlineCostFeatureGroup),
         REGISTER_GROUP(NumLoops, InlineCostFeatureGroup),
         REGISTER_GROUP(DeadBlocks, InlineCostFeatureGroup),
@@ -874,7 +881,7 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_GROUP(IsMultipleBlocks, InlineCostFeatureGroup),
         REGISTER_GROUP(NestedInlines, InlineCostFeatureGroup),
         REGISTER_GROUP(NestedInlineCostEstimate, InlineCostFeatureGroup),
-        REGISTER_GROUP(Threshold, InlineCostFeatureGroup),
+        REGISTER_GROUP(Threshold, ThresholdFeatureGroup),
         REGISTER_GROUP(BasicBlockCount, FPIRelated),
         REGISTER_GROUP(BlocksReachedFromConditionalInstruction, FPIRelated),
         REGISTER_GROUP(Uses, FPIRelated),
@@ -1017,6 +1024,8 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_FUNCTION(JumpTablePenalty, calculateInlineCostFeatures),
         REGISTER_FUNCTION(CaseClusterPenalty, calculateInlineCostFeatures),
         REGISTER_FUNCTION(SwitchPenalty, calculateInlineCostFeatures),
+        REGISTER_FUNCTION(SwitchDefaultDestPenalty,
+                          calculateInlineCostFeatures),
         REGISTER_FUNCTION(UnsimplifiedCommonInstructions,
                           calculateInlineCostFeatures),
         REGISTER_FUNCTION(NumLoops, calculateInlineCostFeatures),
@@ -1031,7 +1040,7 @@ const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
         REGISTER_FUNCTION(NestedInlines, calculateInlineCostFeatures),
         REGISTER_FUNCTION(NestedInlineCostEstimate,
                           calculateInlineCostFeatures),
-        REGISTER_FUNCTION(Threshold, calculateInlineCostFeatures),
+        REGISTER_FUNCTION(Threshold, calculateThreshold),
         REGISTER_FUNCTION(BasicBlockCount, calculateFPIRelated),
         REGISTER_FUNCTION(BlocksReachedFromConditionalInstruction,
                           calculateFPIRelated),
@@ -1444,11 +1453,15 @@ void calculateEdgeNodeCount(ProteanCollectFeatures &ACF,
 
   int NodeCount = 0;
   int EdgeCount = 0;
-  for (auto &F : *M)
-    if (!F.isDeclaration()) {
+  for (auto &F : *M) {
+    bool Cond =
+        (F.isDeclaration()) || ((F.size() == 1) && (F.front().size() == 1) &&
+                                (isa<UnreachableInst>(F.front().front())));
+    if (!Cond) {
       ++NodeCount;
       EdgeCount += getLocalCalls(F, *FAM);
     }
+  }
 
   std::string EdgeCountStr = std::to_string(EdgeCount);
   std::string NodeCountStr = std::to_string(NodeCount);
@@ -1789,18 +1802,103 @@ void calculateInlineCostFeatures(
   const auto CostFeaturesOpt =
       getInliningCostFeatures(*CB, TIR, GetAssumptionCache);
 
-  const auto ICFGroupBegin =
-      ProteanCollectFeatures::FeatureIndex::InlineCostFeatureGroupBegin;
-  const auto ICFGroupEnd =
-      ProteanCollectFeatures::FeatureIndex::InlineCostFeatureGroupEnd;
+  const ProteanCollectFeatures::FeatureIndex Idxs[] = {
+      ProteanCollectFeatures::FeatureIndex::SROASavings,
+      ProteanCollectFeatures::FeatureIndex::SROALosses,
+      ProteanCollectFeatures::FeatureIndex::LoadElimination,
+      ProteanCollectFeatures::FeatureIndex::CallPenalty,
+      ProteanCollectFeatures::FeatureIndex::CallArgumentSetup,
+      ProteanCollectFeatures::FeatureIndex::LoadRelativeIntrinsic,
+      ProteanCollectFeatures::FeatureIndex::LoweredCallArgSetup,
+      ProteanCollectFeatures::FeatureIndex::IndirectCallPenalty,
+      ProteanCollectFeatures::FeatureIndex::JumpTablePenalty,
+      ProteanCollectFeatures::FeatureIndex::CaseClusterPenalty,
+      ProteanCollectFeatures::FeatureIndex::SwitchDefaultDestPenalty,
+      ProteanCollectFeatures::FeatureIndex::SwitchPenalty,
+      ProteanCollectFeatures::FeatureIndex::UnsimplifiedCommonInstructions,
+      ProteanCollectFeatures::FeatureIndex::NumLoops,
+      ProteanCollectFeatures::FeatureIndex::DeadBlocks,
+      ProteanCollectFeatures::FeatureIndex::SimplifiedInstructions,
+      ProteanCollectFeatures::FeatureIndex::ConstantArgs,
+      ProteanCollectFeatures::FeatureIndex::ConstantOffsetPtrArgs,
+      ProteanCollectFeatures::FeatureIndex::CallSiteCost,
+      ProteanCollectFeatures::FeatureIndex::ColdCcPenalty,
+      ProteanCollectFeatures::FeatureIndex::LastCallToStaticBonus,
+      ProteanCollectFeatures::FeatureIndex::IsMultipleBlocks,
+      ProteanCollectFeatures::FeatureIndex::NestedInlines,
+      ProteanCollectFeatures::FeatureIndex::NestedInlineCostEstimate,
+  };
+  const InlineCostFeatureIndex TmpIdxs[] = {
+      InlineCostFeatureIndex::sroa_savings,
+      InlineCostFeatureIndex::sroa_losses,
+      InlineCostFeatureIndex::load_elimination,
+      InlineCostFeatureIndex::call_penalty,
+      InlineCostFeatureIndex::call_argument_setup,
+      InlineCostFeatureIndex::load_relative_intrinsic,
+      InlineCostFeatureIndex::lowered_call_arg_setup,
+      InlineCostFeatureIndex::indirect_call_penalty,
+      InlineCostFeatureIndex::jump_table_penalty,
+      InlineCostFeatureIndex::case_cluster_penalty,
+      InlineCostFeatureIndex::switch_default_dest_penalty,
+      InlineCostFeatureIndex::switch_penalty,
+      InlineCostFeatureIndex::unsimplified_common_instructions,
+      InlineCostFeatureIndex::num_loops,
+      InlineCostFeatureIndex::dead_blocks,
+      InlineCostFeatureIndex::simplified_instructions,
+      InlineCostFeatureIndex::constant_args,
+      InlineCostFeatureIndex::constant_offset_ptr_args,
+      InlineCostFeatureIndex::callsite_cost,
+      InlineCostFeatureIndex::cold_cc_penalty,
+      InlineCostFeatureIndex::last_call_to_static_bonus,
+      InlineCostFeatureIndex::is_multiple_blocks,
+      InlineCostFeatureIndex::nested_inlines,
+      InlineCostFeatureIndex::nested_inline_cost_estimate,
+  };
 
-  for (auto Idx = ICFGroupBegin + 1; Idx != ICFGroupEnd; ++Idx) {
-    size_t TmpIdx =
-        static_cast<size_t>(Idx) - static_cast<size_t>(ICFGroupBegin) - 1;
+  for (int i = 0;
+       i < static_cast<int>(sizeof(Idxs) /
+                            sizeof(ProteanCollectFeatures::FeatureIndex));
+       ++i) {
+    auto Idx = Idxs[i];
+    size_t TmpIdx = static_cast<size_t>(TmpIdxs[i]);
     ACF.setFeatureValueAndInfo(
         Idx, Info,
         std::to_string(CostFeaturesOpt ? CostFeaturesOpt.value()[TmpIdx] : 0));
   }
+}
+
+void calculateThreshold(ProteanCollectFeatures &ACF,
+                        const ProteanCollectFeatures::FeatureInfo &Info) {
+  assert(Info.Idx == ProteanCollectFeatures::FeatureIndex::NumOfFeatures ||
+         (ProteanCollectFeatures::getFeatureGroup(Info.Idx) ==
+          ProteanCollectFeatures::GroupID::ThresholdFeatureGroup));
+
+  // Check if we already calculated the values.
+  if (ACF.containsFeature(
+          ProteanCollectFeatures::GroupID::ThresholdFeatureGroup))
+    return;
+
+  auto *CB = Info.SI.CB;
+  auto *FAM = Info.Managers.FAM;
+
+  assert(CB && FAM && "CallBase or FAM is nullptr");
+
+  auto &Callee = *CB->getCalledFunction();
+  auto &TIR = FAM->getResult<TargetIRAnalysis>(Callee);
+
+  auto GetAssumptionCache = [&](Function &F) -> AssumptionCache & {
+    return FAM->getResult<AssumptionAnalysis>(F);
+  };
+
+  const auto CostFeaturesOpt =
+      getInliningCostFeatures(*CB, TIR, GetAssumptionCache);
+
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::Threshold, Info,
+      std::to_string(CostFeaturesOpt
+                         ? CostFeaturesOpt.value()[static_cast<size_t>(
+                               InlineCostFeatureIndex::threshold)]
+                         : 0));
 }
 
 static void
@@ -2989,7 +3087,8 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
   }
   MDC.formatOutput();
   MDC.addModuleFlags(&M);
-  MDC.printOutput();
+  if (FeatureDump)
+    MDC.printOutput();
   return PreservedAnalyses::all();
 }
 

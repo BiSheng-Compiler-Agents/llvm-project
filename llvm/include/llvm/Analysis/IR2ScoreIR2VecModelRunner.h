@@ -9,25 +9,25 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifdef LLVM_HAVE_TF_AOT_IR2SCORECOMPILEDMODEL
+#ifdef LLVM_HAVE_TF_AOT_IR2SCOREIR2VECCOMPILEDMODEL
 
 #ifndef LLVM_ANALYSIS_IR2SCOREMODELRUNNER_H
 #define LLVM_ANALYSIS_IR2SCOREMODELRUNNER_H
 
 #include "llvm/Analysis/AOTModelRunner.h"
-#include "llvm/Analysis/IR2SCORECompiledModel.h"
+#include "llvm/Analysis/IR2SCOREIR2VECCompiledModel.h"
 
 #define IRSCORE "IRSCORE"
 
 namespace llvm {
 
-class IR2ScoreModelRunner : public AOTModelRunner<IR2SCORECompiledModel> {
+class IR2VecModelRunner : public AOTModelRunner<IR2SCOREIR2VECCompiledModel> {
 
 public:
-  IR2ScoreModelRunner(LLVMContext &Ctx,
-                      std::vector<std::pair<std::string, std::string>> Features,
-                      StringRef DecisionName)
-      : AOTModelRunner<IR2SCORECompiledModel>(
+  IR2VecModelRunner(LLVMContext &Ctx,
+                    std::vector<std::pair<std::string, std::string>> Features,
+                    StringRef DecisionName)
+      : AOTModelRunner<IR2SCOREIR2VECCompiledModel>(
             Ctx,
             {{"input_1", "float32[" + std::to_string(Features.size()) + "]"}},
             DecisionName) {}
