@@ -1469,8 +1469,9 @@ createIR2ScoreIr2vec(std::vector<std::pair<std::string, std::string>> Inputs,
                      StringRef Decision) {
   // PLACEHOLDER
   LLVMContext Ctx;
-  return std::make_unique<IR2ScoreModelRunner>(Ctx, Inputs, Decision);
+  return std::make_unique<IR2VecModelRunner>(Ctx, Inputs, Decision);
 }
+#endif
 
 #ifdef LLVM_HAVE_TF_AOT_IR2SCOREPROTEANCOMPILEDMODEL
 std::unique_ptr<ACPOModelRunner>
