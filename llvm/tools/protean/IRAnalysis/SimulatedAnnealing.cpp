@@ -44,6 +44,7 @@
 #include <memory>
 #include <random>
 #include <sstream>
+#include <string>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -168,6 +169,18 @@ static int randInt(int Min, int Max) {
   std::mt19937 Gen(RD());
   std::uniform_int_distribution<> Distr(Min, Max);
   return Distr(Gen);
+}
+
+// Add a version to the /shm to support parallel compilation
+static const char *appendToString(const char *original,
+                                  const std::string &extra) {
+
+  size_t NewLen = std::strlen(original) + extra.length() + 1;
+  char *NewBuf = new char[NewLen];
+  std::strcpy(NewBuf, original);
+  std::strcat(NewBuf, extra.c_str());
+
+  return NewBuf;
 }
 
 std::string formatDouble(double Num, int Precision) {
@@ -423,7 +436,15 @@ void SimulatedAnnealingProtean::run() {
     }
 
     const int MAX_BITCODE_SIZE = 200000;
-    const char *shm_name = "/shm";
+
+    // Append PID when naming shared memory object to enable parallel
+    // compilation.
+    llvm::sys::Process::Pid PPid = llvm::sys::Process::getProcessId();
+    LLVM_DEBUG(llvm::dbgs() << "Parent PID: " << PPid << "\n");
+    const std::string ShmBase = "/shm_" + std::to_string(PPid);
+    const char *shm_name = ShmBase.c_str();
+    LLVM_DEBUG(llvm::dbgs() << "Shared memory char name: " << shm_name << "\n");
+
     void *shared_memory = nullptr;
     size_t shm_size;
     if (ModLevelIPC)
@@ -557,7 +578,13 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     return -1;
   }
 
-  const char *ShmName = "/shm";
+  // Append PID when naming shared memory object to enable parallel
+  // compilation.
+  llvm::sys::Process::Pid Pid = getpid();
+  const std::string ShmBase = "/shm_" + std::to_string(Pid);
+  const char *ShmName = ShmBase.c_str();
+  LLVM_DEBUG(llvm::dbgs() << "Parent PID (from the child): " << getpid() << " "
+                          << ShmName << "\n");
 
   if (ModLevelIPC) {
     // Read the module from memory
