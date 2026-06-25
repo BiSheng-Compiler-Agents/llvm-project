@@ -45,6 +45,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
@@ -295,7 +296,14 @@ public:
   }
 
   bool shareModule() {
-    const char *shm_name = "/shm";
+    // Assign Pid versioning name for shared memory to enable parallel
+    // compilation
+    llvm::sys::Process::Pid Pid = getppid();
+    const std::string ShmBase = "/shm_" + std::to_string(Pid);
+    const char *shm_name = ShmBase.c_str();
+    LLVM_DEBUG(llvm::dbgs() << "Parent PID (from the child): " << getpid()
+                            << " " << shm_name << "\n");
+
     int shm_fd = shm_open(shm_name, O_RDWR, 0666);
     if (shm_fd == -1) {
       perror("shm_open");
@@ -318,7 +326,13 @@ public:
   }
 
   void writeFeatures(std::unordered_map<std::string, float> FinalFeatures, IR2Vec::Vector &pgmVector) {
-    const char *shm_name = "/shm";
+    // Assign Pid versioning name for shared memory to enable parallel
+    // compilation
+    llvm::sys::Process::Pid Pid = getppid();
+    const std::string ShmBase = "/shm_" + std::to_string(Pid);
+    const char *shm_name = ShmBase.c_str();
+    LLVM_DEBUG(llvm::dbgs() << "Parent PID (from the child): " << getpid()
+                            << " " << shm_name << "\n");
     int shm_fd = shm_open(shm_name, O_RDWR, 0666);
     if (shm_fd == -1) {
       perror("shm_open");
@@ -377,7 +391,13 @@ public:
   }
 
   void writeModule(llvm::Module *M) {
-    const char *shm_name = "/shm";
+    // Assign Pid versioning name for shared memory to enable parallel
+    // compilation
+    llvm::sys::Process::Pid Pid = getppid();
+    const std::string ShmBase = "/shm_" + std::to_string(Pid);
+    const char *shm_name = ShmBase.c_str();
+    LLVM_DEBUG(llvm::dbgs() << "Parent PID (from the child): " << getpid()
+                            << " " << shm_name << "\n");
     int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
       perror("shm_open");
