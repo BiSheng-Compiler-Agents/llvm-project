@@ -14,6 +14,7 @@
 #include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/PassManager.h"
+#include <map>
 #include <memory>
 
 namespace llvm {
@@ -199,6 +200,22 @@ public:
     return AnnotatedInlinePassName.c_str();
   }
 
+ /// Returns a vector of features for ACPOFIModel.
+  std::vector<std::pair<std::string, std::string>> getFeatures(CallBase &CB);
+
+  /// Helper functions used by getFeatures to retrieve certain information
+  ///{
+  CallBase *getInlinableCS(Instruction &I);
+  int64_t getLocalCalls(Function &F);
+  unsigned getCallLoopLevel(CallBase &CB) const;
+  uint64_t getCalleeBlockFreq(CallBase &CB) const;
+  ///}
+
+  // Allow ACPO infrastructure to replicate Advisor behaviour
+  virtual bool isForcedToStop() const { return false; }
+  bool neverInline(CallBase &CB) const;
+  bool isCSInlinable(CallBase &CB) const;
+
 protected:
   InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                 std::optional<InlineContext> IC = std::nullopt);
@@ -211,6 +228,11 @@ protected:
   const std::optional<InlineContext> IC;
   const std::string AnnotatedInlinePassName;
   std::unique_ptr<ImportedFunctionsInliningStatistics> ImportedFunctionsStats;
+
+  /// Map a function to its callheight
+  std::map<const Function *, unsigned> FunctionLevels;
+  // used by getORE() for legacy PM
+  static std::unique_ptr<OptimizationRemarkEmitter> ORE;
 
   enum class MandatoryInliningKind { NotMandatory, Always, Never };
 
@@ -388,6 +410,9 @@ void emitInlinedIntoBasedOnCost(OptimizationRemarkEmitter &ORE, DebugLoc DLoc,
                                 const Function &Caller, const InlineCost &IC,
                                 bool ForProfileContext = false,
                                 const char *PassName = nullptr);
+
+/// get call site location as string.
+std::string getCallSiteLocation(DebugLoc DLoc);
 
 /// Add location info to ORE message.
 void addLocationToRemarks(OptimizationRemark &Remark, DebugLoc DLoc);

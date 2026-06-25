@@ -46,16 +46,26 @@ endfunction()
 # called ${cpp_class} - which may be a namespace-qualified class name.
 function(tf_compile model tag_set signature_def_key fname cpp_class hdr_file obj_file)
   tf_get_absolute_path(${model} ${CMAKE_CURRENT_BINARY_DIR} LLVM_ML_MODELS_ABSOLUTE)
-  message("Using model at " ${LLVM_ML_MODELS_ABSOLUTE})
+
+  # $new_hdr_file is the path to build/include/llvm/Analysis/<header_file_name>.h,
+  # where the header file should be copied to.
+  string(REPLACE "lib" "include/llvm" new_hdr_file "${hdr_file}")
+  cmake_path(GET LLVM_SOURCE_DIR PARENT_PATH LLVM_SOURCE_PRJ)
+
   add_custom_command(OUTPUT ${obj_file} ${hdr_file}
     COMMAND ${TENSORFLOW_AOT_COMPILER} aot_compile_cpu
           --multithreading false
-          --dir ${LLVM_ML_MODELS_ABSOLUTE}
+          --dir ${LLVM_SOURCE_PRJ}/${LLVM_ACPO_MODEL_PATHS}
           --tag_set ${tag_set}
-          --signature_def_key ${signature_def_key}
-          --output_prefix ${prefix}
+          --signature_def_key serving_default
+          # Output_prefix used to be ${prefix}, but since cmake cd's into the directory
+          # it works as just fname
+          --output_prefix ${fname}
           --cpp_class ${cpp_class}
           --target_triple ${LLVM_HOST_TRIPLE}
+    COMMAND ${CMAKE_COMMAND} -E copy
+              ${hdr_file}
+              ${new_hdr_file}
   )
 
   # Aggregate the objects so that results of different tf_compile calls may be
@@ -82,8 +92,10 @@ function(tf_find_and_compile model default_url default_path test_model_generator
   if (EXISTS "${override_header}" AND EXISTS "${override_object}")
     configure_file(${override_header} ${hdr_file} COPYONLY)
     configure_file(${override_object} ${obj_file} COPYONLY)
+    string(REPLACE "lib" "include/llvm" new_hdr_file "${hdr_file}")
+    configure_file(${override_header} ${new_hdr_file} COPYONLY)
     message(STATUS "Using provided header " ${hdr_file} " and object " ${obj_file} "
-      files for model " ${fname})  
+      files for model " ${fname})
     set(GENERATED_OBJS ${GENERATED_OBJS} ${obj_file})
     set(GENERATED_HEADERS ${GENERATED_HEADERS} ${hdr_file})
   elseif("${model}" STREQUAL "none")
