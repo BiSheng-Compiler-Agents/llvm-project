@@ -13,9 +13,13 @@
 
 #include "llvm/Analysis/InlineAdvisor.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/FunctionPropertiesAnalysis.h"
 #include "llvm/Analysis/InlineCost.h"
+#include "llvm/Analysis/InlineSizeEstimatorAnalysis.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/ReplayInlineAdvisor.h"
@@ -23,10 +27,13 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/Utils/ImportedFunctionsInliningStatistics.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
+#include <memory>
+
 
 using namespace llvm;
 #define DEBUG_TYPE "inline"
@@ -518,6 +525,39 @@ void llvm::emitInlinedIntoBasedOnCost(
         Remark << " with " << IC;
       },
       PassName);
+}
+
+CallBase *InlineAdvisor::getInlinableCS(Instruction &I) {
+  if (auto *CS = dyn_cast<CallBase>(&I))
+    if (Function *Callee = CS->getCalledFunction()) {
+      if (!Callee->isDeclaration()) {
+        return CS;
+      }
+    }
+  return nullptr;
+}
+
+// TODO: We can make this faster on large programs by applying
+// this patch from MLGO f46dd19b480496d2ba0a57d12935882e530f2b93.
+// This patch incrementally computes FunctionPropertiesInfo
+// instead of recomputing.
+int64_t InlineAdvisor::getLocalCalls(Function &F) {
+  return FAM.getResult<FunctionPropertiesAnalysis>(F)
+      .DirectCallsToDefinedFunctions;
+}
+
+unsigned InlineAdvisor::getCallLoopLevel(CallBase &CB) const {
+  Function *F = CB.getCaller();
+  BasicBlock *BB = CB.getParent();
+  LoopInfo &LI = FAM.getResult<LoopAnalysis>(*F);
+  return LI.getLoopDepth(BB);
+}
+
+uint64_t InlineAdvisor::getCalleeBlockFreq(CallBase &CB) const {
+  Function *F = CB.getCaller();
+  BasicBlock *BB = CB.getParent();
+  BlockFrequencyInfo &BFI = FAM.getResult<BlockFrequencyAnalysis>(*F);
+  return BFI.getBlockFreq(BB).getFrequency();
 }
 
 InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
