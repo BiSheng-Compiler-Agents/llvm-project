@@ -560,6 +560,11 @@ uint64_t InlineAdvisor::getCalleeBlockFreq(CallBase &CB) const {
   return BFI.getBlockFreq(BB).getFrequency();
 }
 
+unsigned InlineAdvisor::getCallSiteHeight(CallBase *CB) {
+  Function *Caller = CB->getCaller();
+  return FunctionLevels[Caller];
+}
+
 InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                              std::optional<InlineContext> IC)
     : M(M), FAM(FAM), IC(IC),

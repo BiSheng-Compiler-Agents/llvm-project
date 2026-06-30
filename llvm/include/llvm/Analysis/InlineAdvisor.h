@@ -209,6 +209,8 @@ public:
   int64_t getLocalCalls(Function &F);
   unsigned getCallLoopLevel(CallBase &CB) const;
   uint64_t getCalleeBlockFreq(CallBase &CB) const;
+  unsigned getCallSiteHeight(CallBase *CB);
+
   ///}
 
   // Allow ACPO infrastructure to replicate Advisor behaviour
@@ -233,6 +235,8 @@ protected:
   std::map<const Function *, unsigned> FunctionLevels;
   // used by getORE() for legacy PM
   static std::unique_ptr<OptimizationRemarkEmitter> ORE;
+
+  friend class ProteanCollectFeatures;
 
   enum class MandatoryInliningKind { NotMandatory, Always, Never };
 

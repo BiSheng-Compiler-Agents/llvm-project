@@ -47,12 +47,10 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
   endif()
 endif()
 
-set(BSPUB_LINK_COMPONENTS "")
-if (LLVM_BSPUB_COMMON)
+set(PROTEAN_LINK_COMPONENTS "")
   set(BSPUB_LINK_COMPONENTS
     TransformUtils
   )
-endif()
 
 add_llvm_component_library(LLVMAnalysis
   ACPOModel.cpp
@@ -93,7 +91,6 @@ add_llvm_component_library(LLVMAnalysis
   DomPrinter.cpp
   DomTreeUpdater.cpp
   DominanceFrontier.cpp
-  DumpCallsite.cpp
   DumpFeature.cpp
   FunctionPropertiesAnalysis.cpp
   GlobalsModRef.cpp
@@ -150,6 +147,7 @@ add_llvm_component_library(LLVMAnalysis
   PhiValues.cpp
   PostDominators.cpp
   ProfileSummaryInfo.cpp
+  ProteanCollectFeatures.cpp
   PtrUseVisitor.cpp
   RegionInfo.cpp
   RegionPass.cpp
@@ -197,4 +195,5 @@ add_llvm_component_library(LLVMAnalysis
   ProfileData
   Support
   TargetParser
+  ${PROTEAN_LINK_COMPONENTS}
   )
