@@ -73,6 +73,11 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   set_source_files_properties(ConstantFolding.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 endif()
 
+set(PROTEAN_LINK_COMPONENTS "")
+  set(BSPUB_LINK_COMPONENTS
+    TransformUtils
+  )
+
 add_llvm_component_library(LLVMAnalysis
   ACPOModel.cpp
   ACPOMLInterface.cpp
@@ -177,6 +182,7 @@ add_llvm_component_library(LLVMAnalysis
   PhiValues.cpp
   PostDominators.cpp
   ProfileSummaryInfo.cpp
+  ProteanCollectFeatures.cpp
   PtrUseVisitor.cpp
   RegionInfo.cpp
   RegionPass.cpp
@@ -228,4 +234,5 @@ add_llvm_component_library(LLVMAnalysis
   ProfileData
   Support
   TargetParser
+  ${PROTEAN_LINK_COMPONENTS}
   )
