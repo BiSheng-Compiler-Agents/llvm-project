@@ -6,7 +6,6 @@
 //
 // ===--------------------------------------------------------------------=== //
 
-#if defined(BSPUB_COMMON)
 #include "llvm/Analysis/LoopReuseAnalysis.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
@@ -298,39 +297,17 @@ int LoopReuseInfo::getOuterLoopReuse() { return OuterLoopReuseCount; }
 
 int LoopReuseInfo::getLiveCount() { return LiveCount; }
 
-// LoopReuseAnalysis
-LoopReuseAnalysis::LoopReuseAnalysis() : FunctionPass(ID) {
-  initializeLoopReuseAnalysisPass(*PassRegistry::getPassRegistry());
-}
 
 void LoopReuseAnalysis::print(raw_ostream &OS, const Module *M) const {
   OS.indent(2) << "Loop reuse analysis pass instance.\n";
 }
 
-bool LoopReuseAnalysis::runOnFunction(Function &F) {
-  auto SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
-  auto LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  LRR.reset(new LoopReuseResult(SE, LI));
-  return false;
-}
 
 void LoopReuseAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<ScalarEvolutionWrapperPass>();
   AU.addRequired<LoopInfoWrapperPass>();
   AU.setPreservesAll();
 }
-
-namespace llvm {
-static const char lra_name[] = "Loop Reuse Analysis";
-}
-
-char LoopReuseAnalysis::ID = 0;
-#define LRA_NAME "loop-reuse"
-
-INITIALIZE_PASS_BEGIN(LoopReuseAnalysis, LRA_NAME, llvm::lra_name, false, true)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_END(LoopReuseAnalysis, LRA_NAME, llvm::lra_name, false, true)
 
 // LoopReuseAnalysisWrapper
 AnalysisKey LoopReuseAnalysisWrapper::Key;
@@ -341,4 +318,3 @@ LoopReuseResult LoopReuseAnalysisWrapper::run(Function &F,
   LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
   return LoopReuseResult(&SE, &LI);
 }
-#endif
