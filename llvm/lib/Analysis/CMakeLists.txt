@@ -79,8 +79,8 @@ set(PROTEAN_LINK_COMPONENTS "")
   )
 
 add_llvm_component_library(LLVMAnalysis
-  ACPOModel.cpp
   ACPOMLInterface.cpp
+  ACPOModel.cpp
   AliasAnalysis.cpp
   AliasAnalysisEvaluator.cpp
   AliasSetTracker.cpp
@@ -156,10 +156,10 @@ add_llvm_component_library(LLVMAnalysis
   LoopAnalysisManager.cpp
   LoopCacheAnalysis.cpp
   LoopNestAnalysis.cpp
-  LoopReuseAnalysis.cpp
   LoopUnrollAnalyzer.cpp
   LoopInfo.cpp
   LoopPass.cpp
+  LoopReuseAnalysis.cpp
   MLInlineAdvisor.cpp
   MemDerefPrinter.cpp
   MemoryBuiltins.cpp
@@ -235,5 +235,6 @@ add_llvm_component_library(LLVMAnalysis
   ProfileData
   Support
   TargetParser
-  ${PROTEAN_LINK_COMPONENTS}
+  TransformUtils
+  IR2Vec
   )

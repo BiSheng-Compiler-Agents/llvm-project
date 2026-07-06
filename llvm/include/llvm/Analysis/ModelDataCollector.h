@@ -68,7 +68,6 @@ public:
                                const std::string &FuncName,
                                const std::string &LoopName);
 
-  virtual void collectFeatures();
   virtual void proteanCollectFeatures();
 
   // FeatureCollectInfo contains the information of registered feature.

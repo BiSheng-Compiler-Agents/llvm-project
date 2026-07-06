@@ -25,20 +25,21 @@ using namespace llvm;
 
 #define DEBUG_TYPE "model-data-collector"
 
-//  Defined in 'lib/Autotuner/AutoTuning.cpp'
-extern cl::opt<std::string> OutputOppDir;
-extern cl::opt<std::string> InputFile;
+static cl::opt<std::string> InputFile("mdc-input", cl::Hidden,
+                               cl::desc("Specify the input file"));
 
-// Defined in 'lib/IR/AsmWriter.cpp'
-extern cl::opt<std::string> UnnamedVariablePrefix;
+static cl::opt<std::string> OutputOppDir(
+    "mdc-opp", cl::Hidden,
+    cl::desc("Specify the output directory of tuning opportunities"));
+
+static cl::opt<std::string> UnnamedVariablePrefix(
+    "unnamed-var-prefix", cl::Hidden,
+    cl::desc("Specify the prefix added to unnamed variables"), cl::init(""));
 
 static cl::opt<std::string>
     IRFileDirectory("IR-file-directory", cl::Hidden,
                     cl::desc("Name of a directory to store IR files."));
 
-cl::opt<std::string>
-    ACPOModelFile("acpo-dump-file", cl::init("-"), cl::Hidden,
-                  cl::desc("Name of a file to store feature data in."));
 cl::opt<std::string>
     ProteanModelFile("protean-dump-file", cl::init("-"), cl::Hidden,
                      cl::desc("Name of a file to store feature data in."));
@@ -91,6 +92,10 @@ bool ModelDataCollector::isEmptyOutputFile() {
 
   return false;
 }
+
+void ModelDataCollector::collectFeatures(Loop *L, const std::string &ModuleName,
+                                         const std::string &FuncName,
+                                         const std::string &LoopName) {}
 
 void ModelDataCollector::proteanCollectFeatures() {
   for (auto &FeatureCollectInfo : ProteanFeatureCollectInfos) {
@@ -169,6 +174,11 @@ void ModelDataCollector::registerFeature(
   tmp->Postfix = Post;
 
   ProteanFeatureCollectInfos.push_back(std::move(tmp));
+}
+
+void ModelDataCollector::resetRegisteredFeatures() {
+  ProteanFeatureCollectInfos.clear();
+  Features.clear();
 }
 
 std::string ModelDataCollector::demangleName(const std::string &Name) {
