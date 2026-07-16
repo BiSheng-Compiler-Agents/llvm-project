@@ -1,44 +1,64 @@
-# The LLVM Compiler Infrastructure
+# Protean Compiler Framework
 
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/llvm/llvm-project/badge)](https://securityscorecards.dev/viewer/?uri=github.com/llvm/llvm-project)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8273/badge)](https://www.bestpractices.dev/projects/8273)
-[![libc++](https://github.com/llvm/llvm-project/actions/workflows/libcxx-build-and-test.yaml/badge.svg?branch=main&event=schedule)](https://github.com/llvm/llvm-project/actions/workflows/libcxx-build-and-test.yaml?query=event%3Aschedule)
+[![LLVM](https://img.shields.io/badge/LLVM-v19.1.7-blue)](https://github.com/llvm/llvm-project/releases/tag/llvmorg-19.1.7)
 
-Welcome to the LLVM project!
+Welcome to the Protean Compiler project!
 
-This repository contains the source code for LLVM, a toolkit for the
-construction of highly optimized compilers, optimizers, and run-time
-environments.
+This repository contains the source code for Protean, a C/C++ compiler based
+on [LLVM 19.x](https://github.com/llvm/llvm-project/tree/release/19.x) with
+ML-guided phase ordering capabilities.
 
-The LLVM project has multiple components. The core of the project is
-itself called "LLVM". This contains all of the tools, libraries, and header
-files needed to process intermediate representations and convert them into
-object files. Tools include an assembler, disassembler, bitcode analyzer, and
-bitcode optimizer.
+Protean's ML model, a.k.a. `IR2Score`, can leverage either our own handcrafted
+static features, i.e. `Protean Feature Set (PFS)`, defined in
+ `llvm/include/llvm/Analysis/ProteanCollectFeatures.h`, or
+[IR2Vec](https://github.com/IITH-Compilers/IR2Vec.git) embeddings. Users can
+decide which version of the model to use by passing a command-line option when
+compiling their projects with Protean:
 
-C-like languages use the [Clang](https://clang.llvm.org/) frontend. This
-component compiles C, C++, Objective-C, and Objective-C++ code into LLVM bitcode
--- and from there into object files, using LLVM.
+```
+-Wprotean,-use-protean-collect=false // Use IR2Score trained w/ IR2VEC
+-Wprotean,-use-protean-collect=true  // Use IR2Score trained w/ PFS
+```
 
-Other components include:
-the [libc++ C++ standard library](https://libcxx.llvm.org),
-the [LLD linker](https://lld.llvm.org), and more.
+## Build Instuctions
 
-## Getting the Source Code and Building LLVM
+IR2Vec is a submodule in this repository, so after cloning the project, you
+will need to initialize the submodule:
 
-Consult the
-[Getting Started with LLVM](https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm)
-page for information on building and running LLVM.
+```sh
+git submodule update --init --recursive
+```
 
-For information on how to contribute to the LLVM project, please take a look at
-the [Contributing to LLVM](https://llvm.org/docs/Contributing.html) guide.
+Once the submodule is also checked out, [build LLVM](README-llvm.md) as you
+normally would with CMake. For example:
 
-## Getting in touch
+```sh
+mkdir build
 
-Join the [LLVM Discourse forums](https://discourse.llvm.org/), [Discord
-chat](https://discord.gg/xS7Z362),
-[LLVM Office Hours](https://llvm.org/docs/GettingInvolved.html#office-hours) or
-[Regular sync-ups](https://llvm.org/docs/GettingInvolved.html#online-sync-ups).
+cmake -G Ninja -B $PWD/build \
+    -DCMAKE_BUILD_TYPE="Release" \
+    -DLLVM_ENABLE_PROJECTS="clang;lld" \
+    $PWD/llvm
 
-The LLVM project has adopted a [code of conduct](https://llvm.org/docs/CodeOfConduct.html) for
-participants to all modes of communication within the project.
+cmake --build $PWD/build -j8
+```
+
+The build will produce the `protean` executable as `$PWD/build/bin/protean`.
+
+## Citation
+
+If you use any of the materials in this project, i.e. code, provided models,
+methodology, etc., please cite this work:
+
+```
+@article{ashouri2026protean,
+  title={Protean Compiler: An Agile Framework to Drive Fine-grain Phase Ordering},
+  author={Ashouri, Amir H and Bagi, Shayan Shirahmad Gale and Satheeskumar, Kavin and Srikanth, Tejas and Zhao, Jonathan and Saidoun, Ibrahim and Wang, Ziwen and Chan, Bryan and Czajkowski, Tomasz S},
+  journal={arXiv preprint arXiv:2602.06142},
+  year={2026}
+}
+```
+
+This work has been accepted by [ACM TACO](https://dl.acm.org/journal/taco) in
+June 2026, and is scheduled to be presented at the HiPEAC 2027 conference as
+an invited paper. Details will be added here soon.
