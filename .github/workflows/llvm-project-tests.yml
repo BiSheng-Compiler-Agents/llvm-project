@@ -14,7 +14,7 @@ on:
         required: false
       os_list:
         required: false
-        default: '["ubuntu-latest", "windows-2019", "macOS-13"]'
+        default: '["ubuntu-24.04", "ubuntu-24.04-arm"]'
       python_version:
         required: false
         type: string
@@ -44,7 +44,7 @@ on:
         # to install a python version linked against a newer version of glibc.
         # TODO(boomanaiden154): Bump the Ubuntu version once the version in the
         # container is bumped.
-        default: '["ubuntu-22.04", "windows-2019", "macOS-13"]'
+        default: '["ubuntu-24.04", "ubuntu-24.04-arm"]'
 
       python_version:
         required: false
@@ -63,10 +63,6 @@ jobs:
   lit-tests:
     name: Lit Tests
     runs-on: ${{ matrix.os }}
-    container:
-      image: ${{(startsWith(matrix.os, 'ubuntu') && 'ghcr.io/llvm/ci-ubuntu-22.04:latest') || null}}
-      volumes:
-        - /mnt/:/mnt/
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +90,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 250
+          submodules: recursive
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
@@ -117,13 +114,9 @@ jobs:
         id: build-llvm
         run: |
           if [ "${{ runner.os }}" == "Linux" ]; then
-            builddir="/mnt/build/"
-            sudo mkdir -p $builddir
-            sudo chown gha $builddir
             extra_cmake_args="-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang"
-          else
-            builddir="$(pwd)"/build
           fi
+          builddir="$(pwd)"/build
           if [ "${{ runner.os }}" == "macOS" ]; then
             # Workaround test failure on some lld tests on MacOS
             # https://github.com/llvm/llvm-project/issues/81967
