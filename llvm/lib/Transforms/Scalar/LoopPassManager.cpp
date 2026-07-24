@@ -233,7 +233,9 @@ PreservedAnalyses FunctionToLoopPassAdaptor::run(Function &F,
                                      AM.getResult<AssumptionAnalysis>(F),
                                      AM.getResult<DominatorTreeAnalysis>(F),
                                      AM.getResult<LoopAnalysis>(F),
+#if defined(PROTEAN)
                                      AM.getResult<LoopReuseAnalysisWrapper>(F),
+#endif
                                      AM.getResult<ScalarEvolutionAnalysis>(F),
                                      AM.getResult<TargetLibraryAnalysis>(F),
                                      AM.getResult<TargetIRAnalysis>(F),

@@ -165,6 +165,7 @@ void initializeLoopDataPrefetchLegacyPassPass(PassRegistry&);
 void initializeLoopExtractorLegacyPassPass(PassRegistry &);
 void initializeLoopInfoWrapperPassPass(PassRegistry&);
 void initializeLoopPassPass(PassRegistry&);
+void initializeLoopReuseAnalysisPass(PassRegistry&);
 void initializeLoopSimplifyPass(PassRegistry&);
 void initializeLoopStrengthReducePass(PassRegistry&);
 void initializeLoopUnrollPass(PassRegistry&);
