@@ -3086,13 +3086,22 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
     auto &LAM = FAM.getResult<LoopAnalysisManagerFunctionProxy>(F).getManager();
     auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
     auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
+// Gaurding against the extra analysis we need for feature collection
+// when Protean compiler is not meant to be used
+// i.e., LoopReuseAnalysisWrapperPass, etc.
+#if defined(PROTEAN)
     auto &LR = FAM.getResult<LoopReuseAnalysisWrapper>(F);
+#endif
     auto &AA = FAM.getResult<AAManager>(F);
     auto &AC = FAM.getResult<AssumptionAnalysis>(F);
     auto &TTI = FAM.getResult<TargetIRAnalysis>(F);
     auto &TLI = FAM.getResult<TargetLibraryAnalysis>(F);
 
+#if defined(PROTEAN)
     LoopStandardAnalysisResults LSAR = {AA,  AC,  DT,      LI,      LR,     SE,
+#else
+    LoopStandardAnalysisResults LSAR = {AA,  AC,  DT,      LI,      SE,
+#endif
                                         TLI, TTI, nullptr, nullptr, nullptr};
     for (Loop *L : LI) {
       MDC.collectLoopFeatures(L, &LSAR, &LAM);
