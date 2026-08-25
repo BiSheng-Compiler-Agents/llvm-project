@@ -1,3 +1,4 @@
+; REQUIRES: ACPO_AOT
 ; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -max-iterations=50 %s 2>&1 | FileCheck %s --check-prefix=GEOMETRIC
 ; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -max-iterations=50 -cooling=Linear %s 2>&1 | FileCheck %s --check-prefix=LINEAR
 ; RUN: protean -protean -passes=verify -debug-only=protean -o %t.bc -max-iterations=100 %s 2>&1 | FileCheck %s --check-prefix=ITERATIONS

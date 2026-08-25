@@ -1,3 +1,4 @@
+; REQUIRES: ACPO_AOT
 ; RUN: protean -protean -debug-only=protean -o %t0 %s 2>&1 >%t0.log
 ; RUN: protean -protean -debug-only=protean -o %t1 %s 2>&1 >%t1.log
 

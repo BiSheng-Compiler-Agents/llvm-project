@@ -1,3 +1,4 @@
+; REQUIRES: ACPO_AOT
 ; RUN: rm -f -- %t1 && opt -passes='default<O3>' --passes='protean-collect-features' --enable-protean-feature-dump  --protean-dump-file=%t1 --debug-only=proteanFC < %s 2> %t2
 ; RUN cat %t1 %t2 | FileCheck %s
 

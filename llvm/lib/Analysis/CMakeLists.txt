@@ -5,8 +5,12 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
   set(LLVM_INLINER_MODEL_CURRENT_URL "<UNSPECIFIED>" CACHE STRING "URL to download the LLVM inliner model")
 
   if (ACPO_AOT)
+  message(STATUS "ACPO_AOT " ${LLVM_ACPO_MODEL_NAMES})
+  message(STATUS "ACPO_AOT " ${LLVM_ACPO_MODEL_PATHS})
+  message(STATUS "ACPO_AOT " ${LLVM_ACPO_MODEL_SIGNATURES})
     foreach (model_name model_path model_signature IN ZIP_LISTS LLVM_ACPO_MODEL_NAMES LLVM_ACPO_MODEL_PATHS LLVM_ACPO_MODEL_SIGNATURES)
-      set(fname ${model_name}CompiledModel)
+      string(TOUPPER "${model_name}" model_name_upper)
+      set(fname "${model_name_upper}CompiledModel")
       string(TOUPPER ${fname} fname_allcaps)
       if (LLVM_ACPO_OVERRIDE)
         string(TOUPPER ${LLVM_ACPO_OVERRIDE_ARCH} arch_allcaps)
@@ -16,6 +20,11 @@ if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
           ${LLVM_ACPO_OVERRIDE_PATH}/${fname}-${arch_allcaps}.o)
       endif()
 
+  message(STATUS "tf_find_and_compile_call() " ${model_path})
+  message(STATUS "tf_find_and_compile_call() " ${LLVM_INLINER_MODEL_CURRENT_URL})
+  message(STATUS "tf_find_and_compile_call() " ${LLVM_INLINER_MODEL_PATH_DEFAULT})
+  message(STATUS "tf_find_and_compile_call() " ${model_signature})
+  message(STATUS "tf_find_and_compile_call() " ${fname})
       tf_find_and_compile(
         ${model_path}
         ${LLVM_INLINER_MODEL_CURRENT_URL}

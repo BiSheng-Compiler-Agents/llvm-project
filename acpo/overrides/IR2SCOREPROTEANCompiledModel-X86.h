@@ -6,8 +6,8 @@
 //
 // clang-format off
 
-#ifndef TFCOMPILE_GENERATED__xla_IR2SCOREPROTEANCompiledModel_llvm_IR2ScoreProteanCompiledModel_H_  // NOLINT(build/header_guard)
-#define TFCOMPILE_GENERATED__xla_IR2SCOREPROTEANCompiledModel_llvm_IR2ScoreProteanCompiledModel_H_  // NOLINT(build/header_guard)
+#ifndef TFCOMPILE_GENERATED__xla_IR2SCOREPROTEANCompiledModel_X86_llvm_IR2SCOREPROTEANCompiledModel_H_  // NOLINT(build/header_guard)
+#define TFCOMPILE_GENERATED__xla_IR2SCOREPROTEANCompiledModel_X86_llvm_IR2SCOREPROTEANCompiledModel_H_  // NOLINT(build/header_guard)
 
 
 
@@ -18,7 +18,7 @@ namespace Eigen { struct ThreadPoolDevice; }
 namespace xla { class ExecutableRunOptions; }
 
 // (Implementation detail) Entry point to the function in the object file.
-extern "C" void _xla_IR2SCOREPROTEANCompiledModel_llvm_IR2ScoreProteanCompiledModel(
+extern "C" void _xla_IR2SCOREPROTEANCompiledModel_X86_llvm_IR2SCOREPROTEANCompiledModel(
     void* result, const ::xla::ExecutableRunOptions* run_options,
     const void** args, void** temps, XlaCustomCallStatus* status,
     int64_t* profile_counters);
@@ -28,12 +28,12 @@ extern "C" void _xla_IR2SCOREPROTEANCompiledModel_llvm_IR2ScoreProteanCompiledMo
 
 namespace llvm {
 
-// IR2ScoreProteanCompiledModel represents a computation previously specified in a
+// IR2SCOREPROTEANCompiledModel represents a computation previously specified in a
 // TensorFlow graph, now compiled into executable code. This extends the generic
 // XlaCompiledCpuFunction class with statically type-safe arg and result
 // methods. Usage example:
 //
-//   IR2ScoreProteanCompiledModel computation;
+//   IR2SCOREPROTEANCompiledModel computation;
 //   // ...set args using computation.argN methods
 //   CHECK(computation.Run());
 //   // ...inspect results using computation.resultN methods
@@ -57,12 +57,14 @@ namespace llvm {
 // Memory stats:
 //   arg bytes total:    564
 //   arg bytes aligned:  576
-//   temp bytes total:   6156
-//   temp bytes aligned: 6272
-class IR2ScoreProteanCompiledModel final : public tensorflow::XlaCompiledCpuFunction {
+//   temp bytes total:   3084
+//   temp bytes aligned: 3200
+class IR2SCOREPROTEANCompiledModel final : public tensorflow::XlaCompiledCpuFunction {
  public:
   // Number of input arguments for the compiled computation.
   static constexpr size_t kNumArgs = 1;
+
+  static constexpr size_t kNumResults = 1;
 
   // Number of variables for the compiled computation.
   static constexpr size_t kNumVariables = 0;
@@ -77,31 +79,36 @@ class IR2ScoreProteanCompiledModel final : public tensorflow::XlaCompiledCpuFunc
     static XlaCompiledCpuFunction::StaticData* kStaticData = [](){
       XlaCompiledCpuFunction::StaticData* data =
         new XlaCompiledCpuFunction::StaticData;
-      set_static_data_raw_function(data, _xla_IR2SCOREPROTEANCompiledModel_llvm_IR2ScoreProteanCompiledModel);
+      set_static_data_raw_function(data, _xla_IR2SCOREPROTEANCompiledModel_X86_llvm_IR2SCOREPROTEANCompiledModel);
       set_static_data_buffer_infos(data, BufferInfos());
       set_static_data_num_buffers(data, kNumBuffers);
+      set_static_data_result_index_table(data, ResultIndexToBufferIndex());
+      set_static_data_num_results(data, kNumResults);
       set_static_data_arg_index_table(data, ArgIndexToBufferIndex());
       set_static_data_num_args(data, kNumArgs);
       set_static_data_num_variables(data, kNumVariables);
       set_static_data_result_index(data, kResultIndex);
+      set_static_data_arg_shape_infos(data, ArgShapeInfos());
+      set_static_data_result_shape_infos(data, ResultShapeInfos());
       set_static_data_arg_names(data, StaticArgNames());
       set_static_data_variable_names(data, StaticVariableNames());
       set_static_data_result_names(data, StaticResultNames());
       set_static_data_program_shape(data, StaticProgramShape());
       set_static_data_hlo_profile_printer_data(
           data, StaticHloProfilePrinterData());
+      set_static_data_use_xla_runtime(data, false);
 
       return data;
     }();
     return *kStaticData;
   }
 
-  IR2ScoreProteanCompiledModel(AllocMode alloc_mode =
+  IR2SCOREPROTEANCompiledModel(AllocMode alloc_mode =
             AllocMode::ARGS_VARIABLES_RESULTS_PROFILES_AND_TEMPS)
       : XlaCompiledCpuFunction(StaticData(), alloc_mode) {}
 
-  IR2ScoreProteanCompiledModel(const IR2ScoreProteanCompiledModel&) = delete;
-  IR2ScoreProteanCompiledModel& operator=(const IR2ScoreProteanCompiledModel&) = delete;
+  IR2SCOREPROTEANCompiledModel(const IR2SCOREPROTEANCompiledModel&) = delete;
+  IR2SCOREPROTEANCompiledModel& operator=(const IR2SCOREPROTEANCompiledModel&) = delete;
 
   // Arg methods for managing input buffers. Buffers are in row-major order.
   // There is a set of methods for each positional argument, with the following
@@ -109,7 +116,7 @@ class IR2ScoreProteanCompiledModel final : public tensorflow::XlaCompiledCpuFunc
   //
   // void set_argN_data(void* data)
   //   Sets the buffer of type T for positional argument N. May be called in
-  //   any AllocMode. Must be called before Run to have an affect. Must be
+  //   any AllocMode. Must be called before Run to have an effect. Must be
   //   called in AllocMode::RESULTS_PROFILES_AND_TEMPS_ONLY for each positional
   //   argument, to set the argument buffers.
   //
@@ -252,38 +259,65 @@ class IR2ScoreProteanCompiledModel final : public tensorflow::XlaCompiledCpuFunc
 
  private:
   // Number of buffers for the compiled computation.
-  static constexpr size_t kNumBuffers = 14;
+  static constexpr size_t kNumBuffers = 12;
 
   static const ::xla::cpu_function_runtime::BufferInfo* BufferInfos() {
     static const ::xla::cpu_function_runtime::BufferInfo
       kBufferInfos[kNumBuffers] = {
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{8388608ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2310144ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2097152ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{524288ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{131072ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{16384ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{8192ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{4096ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2258ULL, 0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2048ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{1024ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{33ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{17ULL, ~0ULL}),
-::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{24577ULL, ~0ULL})
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2097152ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{1155072ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{524288ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{8192ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{4096ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2258ULL, 0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2048ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{2048ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{33ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{17ULL, ~0U, 0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{16ULL, ~0U, ~0U}),
+::xla::cpu_function_runtime::BufferInfo(::xla::cpu_function_runtime::EncodedBufferInfo{12289ULL, ~0U, ~0U})
       };
     return kBufferInfos;
   }
 
+  static const ::tensorflow::int32* ResultIndexToBufferIndex() {
+    static constexpr ::tensorflow::int32 kResultIndexToBufferIndex[kNumResults] = {
+9
+    };
+    return kResultIndexToBufferIndex;
+  }
+
   static const ::tensorflow::int32* ArgIndexToBufferIndex() {
     static constexpr ::tensorflow::int32 kArgIndexToBufferIndex[kNumArgs] = {
-8
+5
     };
     return kArgIndexToBufferIndex;
   }
 
   // The 0-based index of the result tuple in the temporary buffers.
-  static constexpr size_t kResultIndex = 11;
+  static constexpr size_t kResultIndex = 8;
+
+  // Shapes of the input arguments.
+  static constexpr int32_t kArg0Shapes[] = {
+1, 141
+  };
+  static const ShapeInfo* ArgShapeInfos() {
+    static constexpr ShapeInfo kArgShapeInfoTable[kNumArgs] = {
+{ kArg0Shapes, 2 },
+    };
+    return kArgShapeInfoTable;
+  };
+
+  // Shapes of the results.
+  static constexpr int32_t kResult0Shapes[] = {
+1, 1
+  };
+  static const ShapeInfo* ResultShapeInfos() {
+    static constexpr ShapeInfo kResultShapeInfoTable[kNumResults] = {
+{ kResult0Shapes, 2 },
+    };
+    return kResultShapeInfoTable;
+  };
 
   // Array of names of each positional argument, terminated by nullptr.
   static const char** StaticArgNames() {
@@ -319,6 +353,6 @@ class IR2ScoreProteanCompiledModel final : public tensorflow::XlaCompiledCpuFunc
 
 }  // end namespace llvm
 
-#endif  // TFCOMPILE_GENERATED__xla_IR2SCOREPROTEANCompiledModel_llvm_IR2ScoreProteanCompiledModel_H_
+#endif  // TFCOMPILE_GENERATED__xla_IR2SCOREPROTEANCompiledModel_X86_llvm_IR2SCOREPROTEANCompiledModel_H_
 
 // clang-format on

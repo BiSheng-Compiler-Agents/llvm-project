@@ -44,7 +44,7 @@ declare i32 @printf(ptr noundef, ...) #1
 
 ; CHECK: Module|Function|Callee|Caller|Loop
 ; CHECK: function_count
+; CHECK: callsite_cost
 ; CHECK: callee_Blocks
 ; CHECK: caller_Blocks
-; CHECK: callsite_cost
 ; CHECK: TripCount
