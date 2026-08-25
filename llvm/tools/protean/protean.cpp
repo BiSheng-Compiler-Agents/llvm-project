@@ -292,6 +292,10 @@ static cl::list<std::string>
     PassPlugins("load-pass-plugin",
                 cl::desc("Load passes from plugin library"));
 
+//===----------------------------------------------------------------------===//
+// Protean Compiler Hyperparameters
+//
+
 static cl::opt<CoolingType> CoolingSchedule(
     "cooling", cl::init(Geometric),
     cl::desc("Choose Cooling Schedule for Simulated Annealing"),
@@ -336,7 +340,7 @@ static cl::opt<double>
 static cl::opt<double>
     PopulationSize("population-size",
                    cl::desc("Specify Population Size for Genetic Recommender"),
-                   cl::init(10));
+                   cl::init(20));
 
 static cl::opt<CrossoverFunction> CrossoverType(
     "crossover-type", cl::init(SinglePoint),
@@ -807,6 +811,7 @@ int main(int argc, char **argv) {
           MutationType);
       PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
       if (ProteanOutputTable) {
+        errs() << "Protean is performing SA on module: " << M->getName() << "\n";
         std::stringstream ss;
         ss << std::setw(9) << "Iteration  ";
         ss << std::setw(20) << "Current State";
@@ -815,7 +820,6 @@ int main(int argc, char **argv) {
         ss << std::setw(20) << "Current Cost";
         ss << std::setw(20) << "Next Cost";
         ss << std::setw(20) << "Best Cost";
-        ss << std::setw(20) << "Accepted?";
         ss << std::setw(20) << "Temperature\n";
         dbgs() << ss.str();
       }

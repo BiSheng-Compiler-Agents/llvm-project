@@ -13,7 +13,6 @@
 //
 // Requirements:
 // export BISHENG_ACPO_DIR=$LLVM_DIR/acpo
-// export IR2VEC_PATH=path/to/ir2vec
 //===----------------------------------------------------------------------===//
 
 #include "SimulatedAnnealing.h"
@@ -496,7 +495,6 @@ void SimulatedAnnealingProtean::run() {
          << std::setw(20) << formatDouble(cost(S), 6) << std::setw(20)
          << formatDouble(cost(SNew), 6) << std::setw(20)
          << formatDouble(cost(getFinalState()), 6) << std::setw(20)
-         << (P >= Random ? "Y" : "N") << std::setw(20) << formatDouble(Temp, 3)
          << "\n";
       llvm::dbgs() << ss.str();
     }
@@ -618,9 +616,14 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     if (UseProteanCollect) {
       MDC.collectFeatures(M);
       Features = MDC.getFeatures();
+      llvm::errs() << "Collected Protean Features: \n";
+      for (auto i : Features){
+        LLVM_DEBUG(llvm::dbgs() << i.first << ":" << i.second << ", ");
+      }
     } else {
       auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
       IR2Vec::Vector prgmVec = ir2vec.getProgramVector();
+      llvm::errs() << "Collected IR2VEC Features: \n";
       for (int i = 0; i < prgmVec.size(); ++i) {
         std::string Feature = "IR2Vec_";
         Feature += std::to_string(i + 1);
@@ -633,6 +636,10 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     } else {
       readIR2VecFromSharedMemory(ShmName, Features);
     }
+    if (Features.empty()) {
+      llvm::errs() << "No features read from shared memory\n";
+      //return -1;
+    }
   }
 
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
@@ -644,6 +651,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     LLVM_DEBUG(llvm::dbgs() << "{" << P.first << ", " << P.second << "}");
   LLVM_DEBUG(llvm::dbgs() << "\n");
   std::unique_ptr<llvm::ACPOAdvice> Score = IRModel->getAdvice();
+  LLVM_DEBUG(llvm::dbgs() << ":\n");
   if (!Score) {
     LLVM_DEBUG(llvm::dbgs() << "\nScore is null\n");
     llvm::errs() << "Model is null, please recompile with correct model specified\n";

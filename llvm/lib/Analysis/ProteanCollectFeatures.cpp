@@ -279,6 +279,18 @@ public:
       M->addModuleFlag(llvm::Module::Append, VALUE_FLAG, ValueNode);
     }
 
+    LLVM_DEBUG(llvm::errs() << "RowsFeatureValues.size() = "
+             << RowsFeatureValues.size() << "\n");
+
+    size_t NonZero = 0;
+    for (const auto &P : FinalFeatures) {
+      if (P.second != 0.0f)
+        ++NonZero;
+    }
+
+    LLVM_DEBUG(llvm::errs() << "FinalFeatures.size() = " << FinalFeatures.size()
+                << ", nonzero = " << NonZero << "\n");
+
     if (UseProteanInitialPasses) {
       if (shareModule())
         writeModule(M);
@@ -3043,12 +3055,10 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
 
   // Module level collection
   MDC.collectFeatures(&M, IA, &FAM, &AM);
-  if (FeatureDump) {
-    MDC.updateOutput(/*PrintHeader*/ true, &M, nullptr, /*CB*/ nullptr,
-                     /*L*/ nullptr);
-    MDC.updateOutput(/*PrintHeader*/ false, &M, nullptr, /*CB*/ nullptr,
-                     /*L*/ nullptr);
-  }
+  MDC.updateOutput(/*PrintHeader*/ true, &M, nullptr, /*CB*/ nullptr,
+                   /*L*/ nullptr);
+  MDC.updateOutput(/*PrintHeader*/ false, &M, nullptr, /*CB*/ nullptr,
+                   /*L*/ nullptr);
   // Call base collection
   bool CallBaseIsCollected = false;
   for (Function &F : M) {
@@ -3061,15 +3071,13 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
           if (Function *Callee = CB->getCalledFunction()) {
             if (!Callee->isDeclaration()) {
               MDC.collectFeatures(CB, IA, &FAM, &AM);
-              if (FeatureDump) {
-                if (!CallBaseIsCollected) {
-                  CallBaseIsCollected = true;
-                  MDC.updateOutput(/*PrintHeader*/ true, &M, &F, CB,
-                                   /*L*/ nullptr);
-                }
-                MDC.updateOutput(/*PrintHeader*/ false, &M, &F, CB,
+              if (!CallBaseIsCollected) {
+                CallBaseIsCollected = true;
+                MDC.updateOutput(/*PrintHeader*/ true, &M, &F, CB,
                                  /*L*/ nullptr);
               }
+              MDC.updateOutput(/*PrintHeader*/ false, &M, &F, CB,
+                               /*L*/ nullptr);
             }
           }
         }
@@ -3105,13 +3113,11 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
                                         TLI, TTI, nullptr, nullptr, nullptr};
     for (Loop *L : LI) {
       MDC.collectLoopFeatures(L, &LSAR, &LAM);
-      if (FeatureDump) {
-        if (!LoopIsCollected) {
-          LoopIsCollected = true;
-          MDC.updateOutput(/*PrintHeader*/ true, &M, &F, /*CB*/ nullptr, L);
-        }
-        MDC.updateOutput(/*PrintHeader*/ false, &M, &F, /*CB*/ nullptr, L);
+      if (!LoopIsCollected) {
+        LoopIsCollected = true;
+        MDC.updateOutput(/*PrintHeader*/ true, &M, &F, /*CB*/ nullptr, L);
       }
+      MDC.updateOutput(/*PrintHeader*/ false, &M, &F, /*CB*/ nullptr, L);
     }
   }
   MDC.formatOutput();
@@ -3137,9 +3143,9 @@ PreservedAnalyses LoopCollectFeaturesPass::run(Loop &L, LoopAnalysisManager &AM,
   MDC.collectLoopFeatures(&L, &AR, &AM);
   if (MDC.isEmptyOutputFile())
     MDC.updateOutput(/*PrintHeader*/ true, M, F, /*CB*/ nullptr, &L);
+  MDC.updateOutput(/*PrintHeader*/ false, M, F, /*CB*/ nullptr, &L);
   if (FeatureDump)
-    MDC.updateOutput(/*PrintHeader*/ false, M, F, /*CB*/ nullptr, &L);
-  MDC.printOutput();
+    MDC.printOutput();
   return PreservedAnalyses::all();
 }
 

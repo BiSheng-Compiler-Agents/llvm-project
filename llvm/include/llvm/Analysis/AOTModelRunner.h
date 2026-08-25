@@ -13,6 +13,7 @@
 
 #include "llvm/Analysis/ACPOModelRunner.h"
 #include "llvm/Analysis/TensorSpec.h"
+#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "acpo-aot"
 
@@ -86,6 +87,8 @@ public:
   bool setCustomFeature(int FeatureIndex, float FeatureValue) override {
     LLVM_DEBUG(dbgs() << "AOTModelRunner: setting float feature "
                       << FeatureIndex << " to " << FeatureValue << "\n");
+    dbgs() << "AOTModelRunner: setting float feature "
+                      << FeatureIndex << " to " << FeatureValue << "\n";
     *getTensor<float>(FeatureIndex) = FeatureValue;
     return true;
   }
@@ -202,5 +205,5 @@ private:
 
 } // namespace llvm
 
-#endif // LLVM_ANALYSIS_AOTMODEL_H 
- 
+#endif // LLVM_ANALYSIS_AOTMODEL_H
+

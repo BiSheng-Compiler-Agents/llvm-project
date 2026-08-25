@@ -1259,6 +1259,8 @@ set(LLVM_ENABLE_PROFCHECK OFF CACHE BOOL "Enable profile checking in test tools"
 # Then set TENSORFLOW_AOT_PATH to the package install - usually it's ~/.local/lib/python3.7/site-packages/tensorflow
 #
 set(TENSORFLOW_AOT_PATH "" CACHE PATH "Path to TensorFlow pip install dir")
+set(LLVM_INLINER_MODEL_PATH "" CACHE PATH "Path to the inliner model")
+set(ACPO_AOT OFF CACHE BOOL "Whether or not ACPO AOT is enabled")
 
 if (NOT TENSORFLOW_AOT_PATH STREQUAL "")
   set(LLVM_HAVE_TF_AOT "ON" CACHE BOOL "Tensorflow AOT available")

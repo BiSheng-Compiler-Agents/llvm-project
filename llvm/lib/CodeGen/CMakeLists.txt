@@ -9,7 +9,7 @@ if (LLVM_HAVE_MLIR_LOWERING)
     RegAllocEvictModels
     MLDeps
   )
-elseif (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
+elseif ((DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE) AND (NOT ACPO_AOT))
   include(TensorFlowCompile)
   set(LLVM_RAEVICT_MODEL_PATH_DEFAULT "models/regalloc-eviction")
 

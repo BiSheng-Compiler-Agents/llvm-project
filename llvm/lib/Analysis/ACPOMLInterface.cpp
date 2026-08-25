@@ -1473,7 +1473,7 @@ std::shared_ptr<ACPOMLInterface> llvm::createPersistentCompiledMLIF() {
   return PersistentMLIF;
 }
 
-#ifdef LLVM_HAVE_TF_AOT_IR2SCORECOMPILEDMODEL
+#ifdef LLVM_HAVE_TF_AOT_IR2SCOREIR2VECCOMPILEDMODEL
 std::unique_ptr<ACPOModelRunner>
 createIR2ScoreIr2vec(std::vector<std::pair<std::string, std::string>> Inputs,
                      StringRef Decision) {
@@ -1498,7 +1498,7 @@ createIR2ScoreProtean(std::vector<std::pair<std::string, std::string>> Inputs,
 const std::unordered_map<std::string,
                          ACPOMLCPPInterface::CreateModelRunnerFunction>
     ACPOMLCPPInterface::CreateModelRunnerMap = {
-#ifdef LLVM_HAVE_TF_AOT_IR2SCORECOMPILEDMODEL
+#ifdef LLVM_HAVE_TF_AOT_IR2SCOREIR2VECCOMPILEDMODEL
         {"IR2SCOREIR2VEC", createIR2ScoreIr2vec},
 #endif
 #ifdef LLVM_HAVE_TF_AOT_IR2SCOREPROTEANCOMPILEDMODEL
