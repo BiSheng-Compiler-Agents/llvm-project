@@ -308,11 +308,16 @@ std::string PhaseOrderGeneratorBase::mutateSwap(std::string Recipe,
     return Recipe;
   }
   Recipe = mutateLength(Recipe);
-  int Left = randInt(0, Recipe.size() - 1);
+ 
+  // Size guard
+  if (Recipe.size() < 2)
+    return Recipe;
+  
+    int Left = randInt(0, Recipe.size() - 1);
   int Right = 0;
   do {
     Right = randInt(0, Recipe.size() - 1);
-  } while (Left != Right);
+  } while (Left == Right);
   std::swap(Recipe[Left], Recipe[Right]);
   return Recipe;
 }

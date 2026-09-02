@@ -64,9 +64,25 @@ struct SharedMemoryData {
   size_t dataOffset;
 };
 
+// First, we evaluate O3 as our first state 
+static bool isO3BaselineState(const SimulatedAnnealingProtean::State &S) {
+  return S.empty();
+}
+
+// Helper to recognize O3 as a different recipe
+static std::string stateToString(const SimulatedAnnealingProtean::State &S) {
+  // Do not use "O3" as a normal recipe string, because 
+  // PhaseOrderGeneratorBase::generateRecipe(std::string) 
+  // only accepts characters '0' to '4'
+  if (isO3BaselineState(S))
+    return "O3";
+  return PhaseOrderGeneratorBase::recipesToString(S);
+}
+
 void SimulatedAnnealingProtean::generatePermutationsWithRepetitions(
     std::string &Recipes, std::string &Current, int MaxSeqLength) {
-  AllRecipesSet.insert(Current);
+  if (!Current.empty())
+    AllRecipesSet.insert(Current);
   if (Current.size() == MaxSeqLength) {
     return;
   }
@@ -300,7 +316,7 @@ void readFeaturesFromSharedMemory(
   }
   size_t ShmSize = sizeof(SharedMemoryData) + SharedData->dataSize;
 
-  munmap(SharedData, 0);
+  munmap(SharedData, sizeof(SharedMemoryData));
   SharedData = (SharedMemoryData *)mmap(
       nullptr, ShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
   if (SharedData == MAP_FAILED) {
@@ -355,7 +371,7 @@ void readIR2VecFromSharedMemory(
   }
   size_t ShmSize = sizeof(SharedMemoryData) + SharedData->dataSize;
 
-  munmap(SharedData, 0);
+  munmap(SharedData, sizeof(SharedMemoryData));
   SharedData = (SharedMemoryData *)mmap(
       nullptr, ShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
   if (SharedData == MAP_FAILED) {
@@ -387,8 +403,14 @@ void cleanupSharedMemory(const char *shm_name, size_t shm_size,
 }
 
 void SimulatedAnnealingProtean::run() {
-  SimulatedAnnealingProtean::State S = Generator->generateRecipe("01234");
-  SimulatedAnnealingProtean::State SNew = S;
+  // Empty state means real -O3
+  SimulatedAnnealingProtean::State O3State;
+  SimulatedAnnealingProtean::State ABCDEState = 
+    Generator->generateRecipe("01234");
+
+  SimulatedAnnealingProtean::State S = O3State;
+  SimulatedAnnealingProtean::State SNew = O3State;
+  
   setCurState(SNew);
   setFinalState(SNew);
 
@@ -400,12 +422,20 @@ void SimulatedAnnealingProtean::run() {
   std::unordered_set<std::string> ExploredRecipes;
   for (int Iteration = 0; Iteration < this->MaxIterations; ++Iteration) {
     double Temp = temperature(Iteration);
-    if (Iteration != 0) {
+
+    if (Iteration == 0) {
+    // Evaluate true -O3 baseline.
+      SNew = O3State;
+    } else if (Iteration == 1) {
+    // Evaluate ABCDE once, then force SA to start from ABCDE.
+    SNew = ABCDEState;
+    } else {
+      // Real SA exploration starts here.
       SNew = Generator->generateRecipeGenetic(
-          AllRecipes, PhaseOrderGeneratorBase::recipesToString(S), Iteration,
-          Temp);
+      AllRecipes, PhaseOrderGeneratorBase::recipesToString(S),
+      Iteration - 2, Temp);
     }
-    std::string SNewStr = PhaseOrderGeneratorBase::recipesToString(SNew);
+    std::string SNewStr = stateToString(SNew);
     if (ExploredRecipes.find(SNewStr) != ExploredRecipes.end()) {
       LLVM_DEBUG(llvm::dbgs() << "Skipping " << SNewStr << "...\n");
       continue;
@@ -477,28 +507,23 @@ void SimulatedAnnealingProtean::run() {
     } else {
       return;
     }
+    
+    State SBefore = S;
 
     // Accept or reject the new state.
     double P = probabilityOfNewState(S, SNew, Temp);
+    bool ForceAccept = (Iteration == 0 || Iteration == 1);
     if (P == -1) {
+      cleanupSharedMemory(shm_name, shm_size, shared_memory);
       continue;
     }
 
     std::uniform_real_distribution<double> Dist(0, 1);
     double Random = Dist(RandomEngine);
-    if (ProteanOutputTable) {
-      std::stringstream ss;
-      ss << std::setw(9) << Iteration << std::setw(20)
-         << PhaseOrderGeneratorBase::recipesToString(S) << std::setw(20)
-         << PhaseOrderGeneratorBase::recipesToString(SNew) << std::setw(20)
-         << PhaseOrderGeneratorBase::recipesToString(getFinalState())
-         << std::setw(20) << formatDouble(cost(S), 6) << std::setw(20)
-         << formatDouble(cost(SNew), 6) << std::setw(20)
-         << formatDouble(cost(getFinalState()), 6) << std::setw(20)
-         << "\n";
-      llvm::dbgs() << ss.str();
-    }
-    if (P >= Random) {
+
+    // Always accepting -O3 & ABCDE, then for the rest of recipes
+    // Accepted if probability is high
+    if (ForceAccept || P >= Random) {
       LLVM_DEBUG(llvm::dbgs() << "New state accepted\n");
       S = SNew;
     }
@@ -513,11 +538,25 @@ void SimulatedAnnealingProtean::run() {
       }
     }
 
+    if (ProteanOutputTable) {
+      std::stringstream ss;
+      ss << std::setw(9) << Iteration 
+         << std::setw(20) << stateToString(SBefore) 
+         << std::setw(20) << stateToString(SNew) 
+         << std::setw(20) << stateToString(getFinalState())
+         << std::setw(20) << formatDouble(cost(SBefore), 6) 
+         << std::setw(20) << formatDouble(cost(SNew), 6) 
+         << std::setw(20) << formatDouble(cost(getFinalState()), 6) 
+         << std::setw(20) << formatDouble(Temp, 3)
+         << "\n";
+      llvm::dbgs() << ss.str();
+    }
+
     if (getFinalState() != SNew) {
       std::string NewOutputFilename = OutputFilename;
       NewOutputFilename.insert(
           NewOutputFilename.find_last_of("."),
-          "-" + PhaseOrderGeneratorBase::recipesToString(SNew));
+          "-" +  stateToString(SNew));
       std::remove(NewOutputFilename.c_str());
     }
 
@@ -557,7 +596,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
   static std::set<std::string> previousRecipes;
   static std::set<std::string> previousModuleIdentifiers;
-  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  std::string RecipeStr = stateToString(S);
   llvm::LLVMContext Context;
   llvm::SMDiagnostic Err;
   std::vector<std::pair<std::string, std::string>> Features;
@@ -637,14 +676,41 @@ double SimulatedAnnealingProtean::irAnalysisCost(
       readIR2VecFromSharedMemory(ShmName, Features);
     }
     if (Features.empty()) {
-      llvm::errs() << "No features read from shared memory\n";
-      //return -1;
+      llvm::errs() << "No features read from shared memory for recipe "
+                     << RecipeStr << "\n";
+
+      return -1;
     }
   }
 
   std::unique_ptr<llvm::IR2ScoreModel> IRModel =
       std::make_unique<llvm::IR2ScoreModel>(&Context, UseAOTModel, nullptr,
                                             true, UseProteanCollect);
+
+  // Checking features collected for debugging ML Model issues
+  // If features change and model output does not, we point out                                          
+  LLVM_DEBUG({
+  double Checksum = 0.0;
+  for (size_t I = 0; I < Features.size(); ++I) {
+    char *End = nullptr;
+    double V = std::strtod(Features[I].second.c_str(), &End);
+    Checksum += V * static_cast<double>(I + 1);
+  }
+
+             llvm::errs() << "Recipe=" << RecipeStr
+              << " FeatureCount=" << Features.size()
+              << " FeatureChecksum=" << Checksum; ;
+
+  if (!Features.empty()) {
+            llvm::errs() << " First={" << Features.front().first << ", "
+               << Features.front().second << "}"
+               << " Last={" << Features.back().first << ", "
+               << Features.back().second << "}";
+  }
+
+  llvm::dbgs() << "\n";
+  });
+
   IRModel->setMLCustomFeatures(Features);
   LLVM_DEBUG(llvm::dbgs() << "\nFeatures:\n");
   for (auto P : Features)
@@ -677,7 +743,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
 
 double SimulatedAnnealingProtean::fileSizeCost(
     const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
-  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  std::string RecipeStr = stateToString(S);
   uint64_t Size;
   std::error_code EC = llvm::sys::fs::file_size(OutputFilename, Size);
   if (EC) {
@@ -697,7 +763,7 @@ SimulatedAnnealingProtean::mcaCost(const SimulatedAnnealingProtean::State &S,
     llvm::errs() << "Please Export LLVM_DIR to your Install Directory\n";
     return -1.0;
   }
-  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  std::string RecipeStr = stateToString(S);
   // Converts output generated by child to assembly, then runs llvm-mca
   // to collect information about cycles taken
   if (instructionCountCost(S, OutputFilename) < 1.0) {
@@ -736,7 +802,7 @@ SimulatedAnnealingProtean::mcaCost(const SimulatedAnnealingProtean::State &S,
 
 double SimulatedAnnealingProtean::instructionCountCost(
     const SimulatedAnnealingProtean::State &S, std::string OutputFilename) {
-  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  std::string RecipeStr = stateToString(S);
   llvm::LLVMContext Context;
   llvm::SMDiagnostic Err;
   std::unique_ptr<llvm::Module> M =
@@ -758,7 +824,7 @@ double SimulatedAnnealingProtean::instructionCountCost(
 double
 SimulatedAnnealingProtean::cost(const SimulatedAnnealingProtean::State &S) {
   // perform IR analysis to determine cost of current state
-  std::string RecipeStr = PhaseOrderGeneratorBase::recipesToString(S);
+  std::string RecipeStr = stateToString(S);
   // Check if cost has previously been calculated, if so return that value
   if (CostMap.find(RecipeStr) != CostMap.end()) {
     return CostMap[RecipeStr];
@@ -766,7 +832,7 @@ SimulatedAnnealingProtean::cost(const SimulatedAnnealingProtean::State &S) {
   std::string NewOutputFilename = OutputFilename;
   assert(NewOutputFilename.find_last_of(".") != std::string::npos);
   NewOutputFilename.insert(NewOutputFilename.find_last_of("."),
-                           "-" + PhaseOrderGeneratorBase::recipesToString(S));
+                           "-" + stateToString(S));
   switch (CostType) {
   case IRCostFunction::IRAnalysis:
     return irAnalysisCost(S, NewOutputFilename);
@@ -788,8 +854,10 @@ double SimulatedAnnealingProtean::probabilityOfNewState(
   double NewCost = cost(SNew);
 
   CachedCosts.push_back(NewCost);
-  Generator->updateBestRecipes(PhaseOrderGeneratorBase::recipesToString(SNew),
-                               NewCost);
+  if (!isO3BaselineState(SNew)) {
+    Generator->updateBestRecipes(PhaseOrderGeneratorBase::recipesToString(SNew),
+                                 NewCost);
+  }
 
   if ((CurrentCost == -1) || (NewCost == -1)) {
     return -1;

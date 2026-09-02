@@ -796,6 +796,18 @@ int main(int argc, char **argv) {
     if (UseProteanInitialPasses.getValue()) {
       LLVM_DEBUG(dbgs() << "ProteanCompiler :: Beginning Simulated Annealing for Module "
              << M->getName() << "\n");
+
+      auto IsO3BaselineState =
+        [](const SimulatedAnnealingProtean::State &S) {
+        return S.empty();
+      };
+
+      auto StateName =
+        [&](const SimulatedAnnealingProtean::State &S) -> std::string {
+        if (IsO3BaselineState(S))
+          return "O3";
+        return PhaseOrderGeneratorBase::recipesToString(S);
+      };       
       std::string Recipes;
       if (OutputFilename == "-") {
         errs() << "Specify an output.o file with -o (e.g., -o output.bc) to "
@@ -825,24 +837,28 @@ int main(int argc, char **argv) {
       }
 
       SAProtean.run();
+
       if (SAProtean.getFinished()) {
         LLVM_DEBUG(dbgs() << "ProteanCompiler :: Simulated Annealing finished running for "
-                  "Module "
-               << M->getName() << "\n");
-        LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
-                          << PhaseOrderGeneratorBase::recipesToPasses(
-                                 SAProtean.getFinalState(), PassMap)
-                          << "\n");
-        std::string RecipeStr =
-            PhaseOrderGeneratorBase::recipesToString(SAProtean.getFinalState());
+                          << "Module " << M->getName() << "\n");
+
+        if (IsO3BaselineState(SAProtean.getFinalState())) {
+          LLVM_DEBUG(dbgs() << "The final recipe accepted is: default<O3>\n");
+        } else {
+          LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
+                            << PhaseOrderGeneratorBase::recipesToPasses(
+                                   SAProtean.getFinalState(), PassMap)
+                            << "\n");
+        }
+
+        std::string RecipeStr = StateName(SAProtean.getFinalState());
         std::error_code EC;
 
-        // Find the best recipe and copy it to the appropriate file names.
         std::string RecipeOutputFilename = OutputFilename;
         RecipeOutputFilename.insert(RecipeOutputFilename.find_last_of("."),
                                     "-" + RecipeStr);
-        std::filesystem::copy(RecipeOutputFilename, OutputFilename.getValue(),
-                              EC);
+
+        std::filesystem::copy(RecipeOutputFilename, OutputFilename.getValue(), EC);
         if (EC) {
           errs() << EC.message() << '\n';
           return 1;
@@ -861,63 +877,74 @@ int main(int argc, char **argv) {
           }
         }
 
-        // Keep the files to prevent deletion.
         if (Out.get())
           Out.get()->keep();
         if (ThinLinkOut.get())
           ThinLinkOut.get()->keep();
         if (RemarksFile.get())
           RemarksFile.get()->keep();
+
         return 0;
       } else {
-        // Reset the outputfile name for each recipe.
-        // NOTE: For now we don't care about the remark files.
-        // TODO: Need the Simulated Annealing to keep track of already visited
-        // states thus we do reuse the same recipe in previous iterations.
-        std::string RecipeStr =
-            PhaseOrderGeneratorBase::recipesToString(SAProtean.getCurState());
+        const auto &CurState = SAProtean.getCurState();
+        bool IsO3Baseline = IsO3BaselineState(CurState);
+        std::string RecipeStr = StateName(CurState);
 
         std::error_code EC;
         sys::fs::OpenFlags Flags =
             OutputAssembly ? sys::fs::OF_TextWithCRLF : sys::fs::OF_None;
 
-        // Reset for outputfile
         std::string NewOutputFilename = OutputFilename;
         NewOutputFilename.insert(NewOutputFilename.find_last_of("."),
                                  "-" + RecipeStr);
-        Out.reset(new ToolOutputFile(NewOutputFilename, EC, Flags));
 
-        // Reset for ThinLinkBitcodeFile
+        Out.reset(new ToolOutputFile(NewOutputFilename, EC, Flags));
+        if (EC) {
+          errs() << EC.message() << '\n';
+          return 1;
+        }
+
         if (!ThinLinkBitcodeFile.empty()) {
           std::string NewThinLinkBitcodeFile = ThinLinkBitcodeFile;
           NewThinLinkBitcodeFile.insert(
               NewThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
+
           ThinLinkOut.reset(
-              new ToolOutputFile(ThinLinkBitcodeFile, EC, sys::fs::OF_None));
+              new ToolOutputFile(NewThinLinkBitcodeFile, EC, sys::fs::OF_None));
+
           if (EC) {
             errs() << EC.message() << '\n';
             return 1;
           }
         }
 
-        Recipes = PhaseOrderGeneratorBase::recipesToPasses(
-            SAProtean.getCurState(), PassMap);
+        LLVM_DEBUG(dbgs() << "Running Recipe: " << RecipeStr << "\n");
+
+        if (!Pipeline.empty())
+          Pipeline += ",";
+
+        if (IsO3Baseline) {
+          Pipeline += "default<O3>";
+        } else {
+          std::string Recipes =
+              PhaseOrderGeneratorBase::recipesToPasses(CurState, PassMap);
+
+          Pipeline += "annotation2metadata,forceattrs,inferattrs,coro-early";
+
+          if (!Recipes.empty())
+            Pipeline += ",";
+
+          Pipeline += Recipes;
+        }
+
+        Pipeline += ",protean-collect-features";
+
+        if (UseProteanCollect) {
+          LLVM_DEBUG(dbgs() << "ProteanCollectFeature Pass is enabled!\n");
+        }
+
+        LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
       }
-      LLVM_DEBUG(dbgs() << "Running Recipe: "
-                        << PhaseOrderGeneratorBase::recipesToString(
-                               SAProtean.getCurState())
-                        << "\n");
-      if (!Pipeline.empty())
-        Pipeline += ",";
-      Pipeline += "annotation2metadata,forceattrs,inferattrs,coro-early";
-      if (!Recipes.empty())
-        Pipeline += ",";
-      Pipeline += Recipes;
-      Pipeline += ",protean-collect-features";
-      if (UseProteanCollect) {
-        LLVM_DEBUG(dbgs() << "ProteanCollectFeature Pass is enabled! " << "\n");
-      }
-      LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
     }
 
     OutputKind OK = OK_NoOutput;
