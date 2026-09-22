@@ -138,6 +138,7 @@ std::vector<float> Scales = {
     if (OutputName == IRSCORE) {
       void *ResultUntyped = CompiledModel->result_fetch_output_0_data();
       float *Result = reinterpret_cast<float *>(ResultUntyped);
+      assert(!std::isnan(*Result) && "ModelRunner result was NaN");
       return *Result;
     }
     assert(false && "ModelRunner received invalid result name");

@@ -12,10 +12,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/InlineAdvisor.h"
+#include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/FunctionPropertiesAnalysis.h"
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/InlineSizeEstimatorAnalysis.h"
@@ -27,13 +29,13 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/Utils/ImportedFunctionsInliningStatistics.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
-
 
 using namespace llvm;
 #define DEBUG_TYPE "inline"
@@ -537,6 +539,10 @@ CallBase *InlineAdvisor::getInlinableCS(Instruction &I) {
   return nullptr;
 }
 
+unsigned InlineAdvisor::getFunctionHeight(const Function &F) const {
+  return FunctionLevels.at(&F);
+}
+
 // TODO: We can make this faster on large programs by applying
 // this patch from MLGO f46dd19b480496d2ba0a57d12935882e530f2b93.
 // This patch incrementally computes FunctionPropertiesInfo
@@ -560,9 +566,9 @@ uint64_t InlineAdvisor::getCalleeBlockFreq(CallBase &CB) const {
   return BFI.getBlockFreq(BB).getFrequency();
 }
 
-unsigned InlineAdvisor::getCallSiteHeight(CallBase *CB) {
+unsigned InlineAdvisor::getCallSiteHeight(CallBase *CB) const {
   Function *Caller = CB->getCaller();
-  return FunctionLevels[Caller];
+  return getFunctionHeight(*Caller);
 }
 
 InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
@@ -571,6 +577,36 @@ InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
       AnnotatedInlinePassName((IC && AnnotateInlinePhase)
                                   ? llvm::AnnotateInlinePassName(*IC)
                                   : DEBUG_TYPE) {
+  // Snapshot SCC heights before inlining, with leaves at height zero.
+  CallGraph CG(M);
+  // Include local definitions unreachable from external callers.
+  for (Function &F : M)
+    if (F.hasLocalLinkage() && !F.isDeclaration())
+      CG.getExternalCallingNode()->addCalledFunction(nullptr, CG[&F]);
+
+  for (auto I = scc_begin(&CG); !I.isAtEnd(); ++I) {
+    const auto &Nodes = *I;
+    unsigned Level = 0;
+    for (CallGraphNode *Node : Nodes) {
+      Function *F = Node->getFunction();
+      if (!F || F->isDeclaration())
+        continue;
+      for (Instruction &Inst : instructions(F)) {
+        if (CallBase *CB = getInlinableCS(Inst)) {
+          auto Pos = FunctionLevels.find(CB->getCalledFunction());
+          // Only callees in previously visited SCCs have a level yet.
+          if (Pos != FunctionLevels.end())
+            Level = std::max(Level, Pos->second + 1);
+        }
+      }
+    }
+    for (CallGraphNode *Node : Nodes) {
+      Function *F = Node->getFunction();
+      if (F && !F->isDeclaration())
+        FunctionLevels[F] = Level;
+    }
+  }
+
   if (InlinerFunctionImportStats != InlinerFunctionImportStatsOpts::No) {
     ImportedFunctionsStats =
         std::make_unique<ImportedFunctionsInliningStatistics>();

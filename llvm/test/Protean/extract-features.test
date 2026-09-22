@@ -1,0 +1,33 @@
+# RUN: split-file %s %t
+# RUN: %python %S/Inputs/extract-protean-features.py %t/features.ll | FileCheck %s --check-prefix=PAIRS --match-full-lines
+# RUN: %python %S/Inputs/extract-protean-features.py < %t/features.ll | FileCheck %s --check-prefix=PAIRS --match-full-lines
+# RUN: not %python %S/Inputs/extract-protean-features.py %t/mismatch.ll 2>&1 | FileCheck %s --check-prefix=MISMATCH
+
+# PAIRS: block_freq = 17.000000
+# PAIRS-NEXT: node_count = 2
+# PAIRS-NEXT: escaped,\22name\5C}; = -0.250000
+# PAIRS-NOT: {{.}}
+
+# MISMATCH: error: feature count mismatch: 2 headers, 1 values
+
+#--- features.ll
+; Definitions and flag references need not be in header/value order or adjacent.
+!30 = !{!"17.000000", !"2", !"-0.250000"}
+!12 = !{i32 5, !"proteanFeatureValues", !30}
+!4 = distinct !{
+  !"block_freq", !"node_count", ; comment within a multiline tuple
+  !"escaped,\22name\5C};"
+}
+!llvm.module.flags = !{!12, !7, !2}
+!2 = !{i32 5, !"proteanFeatureHeaders", !4}
+!7 = !{i32 1, !"unrelated", i32 42}
+; Unreferenced nodes must not be mistaken for module flags.
+!99 = !{i32 5, !"proteanFeatureHeaders", !100}
+!100 = !{!"ignored"}
+
+#--- mismatch.ll
+!llvm.module.flags = !{!0, !1}
+!0 = !{i32 5, !"proteanFeatureHeaders", !2}
+!1 = !{i32 5, !"proteanFeatureValues", !3}
+!2 = !{!"block_freq", !"node_count"}
+!3 = !{!"17.000000"}

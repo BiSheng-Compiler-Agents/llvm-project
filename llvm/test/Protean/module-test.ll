@@ -1,3 +1,4 @@
+; RUN: rm -f %t
 ; RUN: opt -passes=protean-collect-features --enable-protean-feature-dump --protean-dump-file=%t < %s
 ; RUN: cat %t | FileCheck %s
 

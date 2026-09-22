@@ -1,0 +1,9 @@
+; REQUIRES: asserts, ACPO_AOT
+; RUN: env BISHENG_ACPO_DIR=%S/../../../acpo protean -protean -cost-type=InstCount \
+; RUN:   -max-iterations=1 -debug-only=protean -preserve-input-debuginfo-format \
+; RUN:   -S %S/instruction-count-debug.ll -o %t.ll 2>&1 | FileCheck %s --check-prefix=COST
+; RUN: FileCheck %s --check-prefix=IR < %t.ll
+
+; COST: Cost of new state: 1.000000e+00
+; COST-NEXT: Cost of current state: 1.000000e+00
+; IR: call void @llvm.dbg.label

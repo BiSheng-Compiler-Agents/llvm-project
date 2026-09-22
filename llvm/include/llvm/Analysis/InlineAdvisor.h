@@ -206,10 +206,12 @@ public:
   /// Helper functions used by getFeatures to retrieve certain information
   ///{
   CallBase *getInlinableCS(Instruction &I);
+  /// Return the function's height in the call graph snapshot at construction.
+  unsigned getFunctionHeight(const Function &F) const;
   int64_t getLocalCalls(Function &F);
   unsigned getCallLoopLevel(CallBase &CB) const;
   uint64_t getCalleeBlockFreq(CallBase &CB) const;
-  unsigned getCallSiteHeight(CallBase *CB);
+  unsigned getCallSiteHeight(CallBase *CB) const;
 
   ///}
 

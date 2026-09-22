@@ -1,0 +1,11 @@
+# REQUIRES: system-linux, asserts, ACPO_AOT
+# RUN: %python -c "print('@large = constant [400000 x i8] c' + chr(34) + 'x' * 400000 + chr(34))" > %t.ll
+# RUN: env BISHENG_ACPO_DIR=%S/../../../acpo protean -protean -module-level-ipc \
+# RUN:   -max-iterations=1 -passes=verify -debug-only=protean,proteanFC -o %t.bc %t.ll 2>&1 | FileCheck %s
+
+# The oversized module cannot be shared. Reject the resulting read error and
+# finish annealing without trying to score the missing module.
+# CHECK: Error: Bitcode size exceeds maximum.
+# CHECK: Error reading module:
+# CHECK-NOT: Cost of new state:
+# CHECK: Finished SA
