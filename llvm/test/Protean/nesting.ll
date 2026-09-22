@@ -1,4 +1,3 @@
-; REQUIRES: asserts
 ; RUN: opt -debug-pass-manager -passes='no-op-module,no-op-cgscc,no-op-module,no-op-function,no-op-loop,no-op-function,no-op-loop' -o %t1.out < %s 2>%t.txt
 ; RUN: opt -debug-pass-manager -passes='cgscc(no-op-cgscc),no-op-module,no-op-function,no-op-loop,no-op-function,no-op-loop' -o %t1.out < %s 2>%t1.txt
 ; RUN: not llvm-diff %t.txt %t1.txt 2>&1 | FileCheck %s --check-prefix CGSCC

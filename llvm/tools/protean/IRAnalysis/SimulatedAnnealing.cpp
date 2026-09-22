@@ -32,13 +32,16 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <llvm/IR/LLVMContext.h>
 #include <memory>
 #include <random>
@@ -198,13 +201,6 @@ static const char *appendToString(const char *original,
   return NewBuf;
 }
 
-std::string formatDouble(double Num, int Precision) {
-  if (Precision == 0)
-    Precision -= 1;
-  std::string D = std::to_string(Num);
-  return D.substr(0, D.find_last_of(".") + Precision + 1);
-}
-
 int createSharedMemory(const char *shm_name, size_t shm_size,
                        void **shared_memory, bool ModLevelIPC) {
   int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
@@ -216,6 +212,7 @@ int createSharedMemory(const char *shm_name, size_t shm_size,
   // Set the size of the shared memory object
   if (ftruncate(shm_fd, shm_size) == -1) {
     perror("ftruncate");
+    close(shm_fd);
     return -1;
   }
 
@@ -223,6 +220,7 @@ int createSharedMemory(const char *shm_name, size_t shm_size,
       mmap(nullptr, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (*shared_memory == MAP_FAILED) {
     perror("mmap");
+    close(shm_fd);
     return -1;
   }
 
@@ -259,8 +257,15 @@ readModuleFromSharedMemory(const char *shm_name, llvm::LLVMContext &Context) {
   SharedMemoryData *shared_data =
       static_cast<SharedMemoryData *>(shared_memory);
   size_t bitcode_size = shared_data->bitcode_size;
-
   munmap(shared_memory, sizeof(SharedMemoryData));
+
+  const int MAX_BITCODE_SIZE = 200000;
+  if (bitcode_size > MAX_BITCODE_SIZE) {
+    llvm::errs() << "Error: Bitcode size exceeds maximum.\n";
+    close(shm_fd);
+    return llvm::make_error<llvm::StringError>("mmap failed",
+                                               llvm::inconvertibleErrorCode());
+  }
 
   // Remap the shared memory with the correct size.
   shared_memory = mmap(nullptr, sizeof(SharedMemoryData) + bitcode_size,
@@ -273,14 +278,6 @@ readModuleFromSharedMemory(const char *shm_name, llvm::LLVMContext &Context) {
   }
 
   shared_data = static_cast<SharedMemoryData *>(shared_memory);
-
-  const int MAX_BITCODE_SIZE = 200000;
-  if (bitcode_size > MAX_BITCODE_SIZE) {
-    llvm::errs() << "Error: Bitcode size exceeds maximum.\n";
-    close(shm_fd);
-    return llvm::make_error<llvm::StringError>("mmap failed",
-                                               llvm::inconvertibleErrorCode());
-  }
 
   std::vector<char> bitcode_buffer(bitcode_size);
   memcpy(bitcode_buffer.data(), (char *)shared_data + shared_data->dataOffset,
@@ -314,6 +311,13 @@ void readFeaturesFromSharedMemory(
     close(ShmFD);
     return;
   }
+  if (SharedData->dataSize >
+      std::numeric_limits<size_t>::max() - sizeof(SharedMemoryData)) {
+    llvm::errs() << "Invalid shared-memory feature buffer size\n";
+    munmap(SharedData, sizeof(SharedMemoryData));
+    close(ShmFD);
+    return;
+  }
   size_t ShmSize = sizeof(SharedMemoryData) + SharedData->dataSize;
 
   munmap(SharedData, sizeof(SharedMemoryData));
@@ -321,33 +325,44 @@ void readFeaturesFromSharedMemory(
       nullptr, ShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
   if (SharedData == MAP_FAILED) {
     perror("mmap (remap reader)");
+    close(ShmFD);
     return;
   }
 
-  char *Ptr =
-      (char *)SharedData + SharedData->dataOffset + IR2VEC_EMBEDDING_SIZE;
-  char *EndPtr = (char *)SharedData + ShmSize;
+  size_t Offset = SharedData->dataOffset;
+  if (Offset < sizeof(SharedMemoryData) || Offset > ShmSize ||
+      ShmSize - Offset < IR2VEC_EMBEDDING_SIZE) {
+    llvm::errs() << "Invalid shared-memory feature buffer offset\n";
+    munmap(SharedData, ShmSize);
+    close(ShmFD);
+    return;
+  }
+  llvm::StringRef Remaining((char *)SharedData + Offset + IR2VEC_EMBEDDING_SIZE,
+                            ShmSize - Offset - IR2VEC_EMBEDDING_SIZE);
+  std::vector<std::pair<std::string, std::string>> ParsedFeatures;
 
   for (size_t i = 0; i < SharedData->featureCount; ++i) {
-    size_t KeySize = strlen(Ptr) + 1;
-    std::string Key(Ptr);
-    Ptr += KeySize;
-
-    if (Ptr + sizeof(float) > EndPtr) {
-      llvm::errs() << "Buffer overflow prevented while copying value for key\n";
+    size_t KeySize = Remaining.find('\0');
+    if (KeySize == 0 || KeySize == llvm::StringRef::npos ||
+        Remaining.size() - KeySize - 1 < sizeof(float)) {
+      llvm::errs() << "Truncated shared-memory feature entry\n";
+      ParsedFeatures.clear();
       break;
     }
+    std::string Key = Remaining.take_front(KeySize).str();
+    Remaining = Remaining.drop_front(KeySize + 1);
     float FloatValue;
-    memcpy(&FloatValue, Ptr, sizeof(float));
-    Ptr += sizeof(float);
+    memcpy(&FloatValue, Remaining.data(), sizeof(float));
+    Remaining = Remaining.drop_front(sizeof(float));
 
     std::stringstream ss;
     ss << std::fixed << std::setprecision(6) << FloatValue;
     std::string Value = ss.str();
 
-    Features.push_back(std::make_pair(Key, Value));
+    ParsedFeatures.push_back(std::make_pair(Key, Value));
   }
 
+  Features.insert(Features.end(), ParsedFeatures.begin(), ParsedFeatures.end());
   munmap(SharedData, ShmSize);
   close(ShmFD);
 }
@@ -376,6 +391,7 @@ void readIR2VecFromSharedMemory(
       nullptr, ShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, ShmFD, 0);
   if (SharedData == MAP_FAILED) {
     perror("mmap (remap reader)");
+    close(ShmFD);
     return;
   }
 
@@ -493,13 +509,29 @@ void SimulatedAnnealingProtean::run() {
     // The parent process waits for the child process to finish and then
     // continue the  Simulated Annealing main loop.
     pid_t Pid = fork();
+    if (Pid == -1) {
+      perror("fork");
+      cleanupSharedMemory(shm_name, shm_size, shared_memory);
+      return;
+    }
+
     if (Pid != 0) {
       int Wstatus;
-      waitpid(Pid, &Wstatus, 0);
-      if (!WIFEXITED(Wstatus)) {
+      pid_t Result;
+      do {
+        Result = waitpid(Pid, &Wstatus, 0);
+      } while (Result == -1 && errno == EINTR);
+
+      if (Result == -1) {
+        perror("waitpid");
+        cleanupSharedMemory(shm_name, shm_size, shared_memory);
+        return;
+      } else if (!WIFEXITED(Wstatus) || WEXITSTATUS(Wstatus) != 0) {
         LLVM_DEBUG(llvm::dbgs()
                    << "Recipe exited unexpected: "
                    << PhaseOrderGeneratorBase::recipesToString(SNew) << "\n");
+        cleanupSharedMemory(shm_name, shm_size, shared_memory);
+        continue;
       } else {
         LLVM_DEBUG(llvm::dbgs()
                    << "Child exited with: " << WEXITSTATUS(Wstatus) << "\n\n");
@@ -540,15 +572,12 @@ void SimulatedAnnealingProtean::run() {
 
     if (ProteanOutputTable) {
       std::stringstream ss;
-      ss << std::setw(9) << Iteration 
-         << std::setw(20) << stateToString(SBefore) 
-         << std::setw(20) << stateToString(SNew) 
-         << std::setw(20) << stateToString(getFinalState())
-         << std::setw(20) << formatDouble(cost(SBefore), 6) 
-         << std::setw(20) << formatDouble(cost(SNew), 6) 
-         << std::setw(20) << formatDouble(cost(getFinalState()), 6) 
-         << std::setw(20) << formatDouble(Temp, 3)
-         << "\n";
+      ss << std::setw(9) << Iteration << std::setw(20) << stateToString(SBefore)
+         << std::setw(20) << stateToString(SNew) << std::setw(20)
+         << stateToString(getFinalState()) << std::setprecision(10)
+         << std::fixed << std::setw(20) << cost(SBefore) << std::setw(20)
+         << cost(SNew) << std::setw(20) << cost(getFinalState())
+         << std::setw(20) << Temp << "\n";
       llvm::dbgs() << ss.str();
     }
 
@@ -585,7 +614,7 @@ double SimulatedAnnealingProtean::temperature(int Iteration) {
     CoolingRate = pow(MinTemperature / MaxTemperature, 1.0 / (MaxIterations));
     return MaxTemperature * pow(CoolingRate, Iteration);
   case CoolingType::Linear:
-    CoolingRate = (MinTemperature + MaxTemperature) / MaxIterations;
+    CoolingRate = (MaxTemperature - MinTemperature) / MaxIterations;
     return this->MaxTemperature - this->CoolingRate * Iteration;
   default:
     llvm_unreachable("Not a valid cooling schedule");
@@ -610,6 +639,10 @@ double SimulatedAnnealingProtean::irAnalysisCost(
   float Cost = 1;
   std::optional<std::string> BishengAcpoDir =
       llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR");
+
+  // TODO: gracefully exit earlier in the compile pipeline so this never needs
+  // to run.
+  assert(BishengAcpoDir && "BISHENG_ACPO_DIR missing");
   if (!BishengAcpoDir) {
     llvm::errs() << "Please Export BISHENG_ACPO_DIR\n";
     return -1;
@@ -639,10 +672,12 @@ double SimulatedAnnealingProtean::irAnalysisCost(
 
     if (moduleOrErr) {
       M = std::move(moduleOrErr.get());
+
       LLVM_DEBUG(llvm::dbgs() << "Module read from shared memory.\n");
     } else {
       llvm::errs() << "Error reading module: "
                     << llvm::toString(moduleOrErr.takeError()) << "\n";
+      return -1;
     }
 
     if (previousModuleIdentifiers.find(M->getModuleIdentifier()) ==
@@ -677,8 +712,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
     }
     if (Features.empty()) {
       llvm::errs() << "No features read from shared memory for recipe "
-                     << RecipeStr << "\n";
-
+                   << RecipeStr << "\n";
       return -1;
     }
   }
@@ -814,7 +848,7 @@ double SimulatedAnnealingProtean::instructionCountCost(
   int Instructions = 0;
   for (auto &F : *M) {
     for (auto &BB : F) {
-      Instructions += BB.size();
+      Instructions += BB.sizeWithoutDebug();
     }
   }
   CostMap[RecipeStr] = Instructions;

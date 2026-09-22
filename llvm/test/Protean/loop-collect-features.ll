@@ -1,3 +1,4 @@
+; RUN: rm -f %t
 ; RUN: opt -passes=loop-collect-features --enable-protean-feature-dump --enable-loop-collect-feature --protean-loop-dump-file=%t < %s
 ; RUN: cat %t | FileCheck %s
 @.str = private unnamed_addr constant [14 x i8] c"loop count %d\00", align 1
@@ -37,4 +38,4 @@ declare i32 @printf(ptr noundef, ...) #1
 !1 = !{!"llvm.loop.mustprogress"}
 
 ; CHECK: MaxLoopHeight
-; CHECK: TripCount
+; CHECK: MinKnownTripCount

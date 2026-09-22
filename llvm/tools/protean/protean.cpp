@@ -815,6 +815,14 @@ int main(int argc, char **argv) {
         return 1;
       }
 
+      // TODO: gracefully exit earlier in the compile pipeline so this never
+      // needs to run.
+      if (CostType == IRCostFunction::IRAnalysis &&
+          !llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR")) {
+        llvm::errs() << "environment variable BISHENG_ACPO_DIR not set\n";
+        return -1;
+      }
+
       SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
           RngVal, CoolingSchedule, MaxTemperature, MinTemperature,
           MaxIterations, CostType, OutputFilename, ProteanOutputTable,

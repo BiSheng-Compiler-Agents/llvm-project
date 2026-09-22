@@ -1,4 +1,5 @@
-; RUN: opt -passes=protean-collect-features --enable-protean-feature-dump --protean-dump-file=%t --protean-loop-dump-file=%t < %s 
+; RUN: rm -f %t
+; RUN: opt -passes=protean-collect-features --enable-protean-feature-dump --protean-dump-file=%t --protean-loop-dump-file=%t < %s
 ; RUN: cat %t | FileCheck %s
 @.str = private unnamed_addr constant [14 x i8] c"loop count %d\00", align 1
 
@@ -47,4 +48,4 @@ declare i32 @printf(ptr noundef, ...) #1
 ; CHECK: callsite_cost
 ; CHECK: callee_Blocks
 ; CHECK: caller_Blocks
-; CHECK: TripCount
+; CHECK: MinKnownTripCount

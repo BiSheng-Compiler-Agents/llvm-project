@@ -2,7 +2,7 @@
 ; REQUIRES: asserts
 ; RUN: rm -f -- %t1 && opt -passes='default<O3>' --passes='protean-collect-features' --enable-protean-feature-dump  --protean-dump-file=%t1 --debug-only=proteanFC < %s 2> %t2
 ; RUN: sed '1d' %t1 > %t3
-; RUN: cat %t3 %t2 | FileCheck %s
+; RUN: cat %t3 %t2 | FileCheck %s --match-full-lines
 
 define i32 @callee(i32 %x) {
 entry:
@@ -35,12 +35,12 @@ for.end:
 
 !1 = !{!"llvm.loop.mustprogress"}
 
-; CHECK: [[HEADER:.*]]||||
-; CHECK-NEXT: [[HEADER]]|main|callee|main|
-; CHECK-NEXT: [[HEADER]]|main|||for.cond
-; CHECK: Protean Feature node_count: 2
-; CHECK: Protean Feature average_calls_per_function: 1.500000
-; CHECK: Protean Feature InstructionPerBlock: 1.000000
-; CHECK: Protean Feature scc_size: 1
-; CHECK: Protean Feature IsInnerMostLoop: 1
-; CHECK: Protean Feature IsOuterMostLoop: 1
+; CHECK: [[HEADER:.*]]||||,{{.*}}
+; CHECK-NEXT: [[HEADER]]|main|callee|main|,{{.*}}
+; CHECK-NEXT: [[HEADER]]|main|||for.cond,{{.*}}
+; CHECK-DAG: Protean Feature node_count: 2
+; CHECK-DAG: Protean Feature average_calls_per_function: 0.5
+; CHECK-DAG: Protean Feature InstructionPerBlock: 1
+; CHECK-DAG: Protean Feature scc_count: 1
+; CHECK-DAG: Protean Feature IsInnerMostLoop: 1
+; CHECK-DAG: Protean Feature IsOuterMostLoop: 1

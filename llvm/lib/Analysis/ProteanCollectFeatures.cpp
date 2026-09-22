@@ -15,6 +15,7 @@
 #include "llvm/Analysis/ProteanCollectFeatures.h"
 #include "llvm/ADT/EnumeratedArray.h"
 #include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
@@ -45,12 +46,16 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/LoopTools.h"
+#include <cmath>
+#include <limits>
 #include <llvm/ADT/APInt.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/LLVMContext.h>
@@ -59,6 +64,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #define DEBUG_TYPE "proteanFC"
 #include "llvm/Bitcode/BitcodeWriter.h"
@@ -92,6 +98,47 @@ namespace llvm {
 static cl::opt<bool> FeatureDump("enable-protean-feature-dump", cl::init(false));
 static cl::opt<bool> EnableLoopCollectFeature("enable-loop-collect-feature",
                                               cl::init(false));
+
+// Ordinary calls are direct, indirect, and declaration calls, but not
+// intrinsics and inline assembly.
+static bool isOrdinaryCall(const CallBase &CB) {
+  if (CB.isInlineAsm())
+    return false;
+  const Function *Callee = CB.getCalledFunction();
+  return !Callee || !Callee->isIntrinsic();
+}
+
+// Preserve enough significant digits to round-trip floating-point features.
+template <typename T> static std::string featureToString(T Value) {
+  static_assert(std::is_arithmetic_v<T>);
+  if constexpr (std::is_floating_point_v<T>) {
+    std::string Result;
+    raw_string_ostream OS(Result);
+    OS << format("%.*g", std::numeric_limits<T>::max_digits10,
+                 static_cast<double>(Value));
+    return Result;
+  } else {
+    return std::to_string(Value);
+  }
+}
+
+// Escape identifiers before assembling internal CSV.
+static std::string encodeIdentifier(StringRef Identifier) {
+  static constexpr char HexDigits[] = "0123456789ABCDEF";
+  std::string Encoded;
+  for (unsigned char C : Identifier) {
+    if (C == '%' || C == ',' || C == '|' || C == '"' || C == '\r' ||
+        C == '\n' || (C == '-' && Encoded.empty())) {
+      // A leading '-' would otherwise be interpreted as a header marker.
+      Encoded += '%';
+      Encoded += HexDigits[C >> 4];
+      Encoded += HexDigits[C & 0xF];
+    } else {
+      Encoded += C;
+    }
+  }
+  return Encoded;
+}
 
 class ModelDataProteanCollector : public ModelDataCollector {
 public:
@@ -200,17 +247,19 @@ public:
       return;
     }
     std::string Out = "";
-    Out += M->getName().str() + ",";
+    Out += encodeIdentifier(M->getName()) + ",";
     if (F)
-      Out += F->getName().str() + ",";
-    if (CB)
-      Out += CB->getCalledFunction()->getName().str() + "," +
-             CB->getCaller()->getName().str() + ",";
+      Out += encodeIdentifier(F->getName()) + ",";
+    if (CB) {
+      if (Function *Callee = CB->getCalledFunction())
+        Out += encodeIdentifier(Callee->getName());
+      Out += "," + encodeIdentifier(CB->getCaller()->getName()) + ",";
+    }
     if (L)
-      Out += L->getName().str() + ",";
+      Out += encodeIdentifier(L->getName()) + ",";
 
     for (const auto &P : getIRFileNameMap()) {
-      Out += P.getValue();
+      Out += encodeIdentifier(P.getValue());
       Out += ",";
     }
 
@@ -266,7 +315,7 @@ public:
     for (const std::string &Feature : AllFeatures) {
       HeaderData.push_back(llvm::MDString::get(M->getContext(), Feature));
       ValueData.push_back(llvm::MDString::get(
-          M->getContext(), std::to_string(FinalFeatures[Feature])));
+          M->getContext(), featureToString(FinalFeatures[Feature])));
     }
     auto *HeaderNode = MDTuple::getDistinct(M->getContext(), HeaderData);
     auto *ValueNode = MDTuple::getDistinct(M->getContext(), ValueData);
@@ -287,6 +336,7 @@ public:
     for (const auto &P : FinalFeatures) {
       if (P.second != 0.0f)
         ++NonZero;
+      assert(!std::isnan(P.second) && "Features must not be NaN");
     }
 
     LLVM_DEBUG(llvm::errs() << "FinalFeatures.size() = " << FinalFeatures.size()
@@ -320,6 +370,7 @@ public:
     int shm_fd = shm_open(shm_name, O_RDWR, 0666);
     if (shm_fd == -1) {
       perror("shm_open");
+      return false;
     }
 
     SharedMemoryData *shared_data =
@@ -328,6 +379,7 @@ public:
     if (shared_data == MAP_FAILED) {
       perror("mmap (child)");
       close(shm_fd);
+      return false;
     }
 
     bool result = shared_data->ModLevelIPC;
@@ -361,7 +413,16 @@ public:
       return;
     }
 
-    shared_data->featureCount = FinalFeatures.size();
+    // Publish feature count after the payload is written to prevent the parent
+    // from using an incomplete set of features.
+    shared_data->featureCount = 0;
+    if (shared_data->dataSize >
+        std::numeric_limits<size_t>::max() - sizeof(SharedMemoryData)) {
+      llvm::errs() << "Invalid shared-memory feature buffer size\n";
+      munmap(shared_data, sizeof(SharedMemoryData));
+      close(shm_fd);
+      return;
+    }
     size_t shm_size = sizeof(SharedMemoryData) + shared_data->dataSize;
 
     munmap(shared_data, sizeof(SharedMemoryData));
@@ -373,11 +434,22 @@ public:
       return;
     }
 
-    double *ir2vec_ptr = (double*) ((char*)shared_data + shared_data->dataOffset);
+    size_t Offset = shared_data->dataOffset;
+    if (Offset < sizeof(SharedMemoryData) || Offset > shm_size ||
+        shared_data->ir2vec_dimension != IR2VEC_DIMENSION ||
+        pgmVector.size() < IR2VEC_DIMENSION ||
+        shm_size - Offset < IR2VEC_EMBEDDING_SIZE) {
+      llvm::errs()
+          << "Invalid shared-memory feature buffer offset or embedding\n";
+      munmap(shared_data, shm_size);
+      close(shm_fd);
+      return;
+    }
+    char *ir2vec_ptr = (char *)shared_data + Offset;
 
     for (int i = 0; i < shared_data->ir2vec_dimension; ++i) {
       memcpy(ir2vec_ptr, &pgmVector[i], sizeof(double));
-      ir2vec_ptr += 1;
+      ir2vec_ptr += sizeof(double);
     }
 
     char *ptr = (char *)shared_data + shared_data->dataOffset + (sizeof(double) * shared_data->ir2vec_dimension);
@@ -387,11 +459,14 @@ public:
       size_t keySize = pair.first.size() + 1;
       size_t valueSize = sizeof(pair.second);
 
-      if (ptr + keySize + valueSize > end_ptr) {
+      size_t Remaining = end_ptr - ptr;
+      if (keySize > Remaining || valueSize > Remaining - keySize) {
         LLVM_DEBUG(
             dbgs() << "Buffer overflow prevented while copying value for key: "
                    << pair.first.c_str() << "\n");
-        break;
+        munmap(shared_data, shm_size);
+        close(shm_fd);
+        return;
       }
       strcpy(ptr, pair.first.c_str());
       ptr += keySize;
@@ -399,6 +474,7 @@ public:
       memcpy(ptr, &pair.second, valueSize);
       ptr += valueSize;
     }
+    shared_data->featureCount = FinalFeatures.size();
     munmap(shared_data, shm_size);
     close(shm_fd);
   }
@@ -435,6 +511,7 @@ public:
     if (bitcode_size > MAX_BITCODE_SIZE) {
       LLVM_DEBUG(dbgs() << "Error: Bitcode size exceeds maximum.\n");
       close(shm_fd);
+      munmap(shared_data, sizeof(SharedMemoryData) + MAX_BITCODE_SIZE);
       return;
     }
 
@@ -484,14 +561,10 @@ public:
       }
     }
     std::string Out = "";
-    if (isEmptyOutputFile()) {
-      Out += "Module|Function|Callee|Caller|Loop,";
-      for (const std::string &Feature : AllFeatures) {
-        Out += Feature + ',';
-      }
-      Out.pop_back();
-      Out += '\n';
-    }
+    OutputHeader = "Module|Function|Callee|Caller|Loop,";
+    for (const std::string &Feature : AllFeatures)
+      OutputHeader += Feature + ',';
+    OutputHeader.back() = '\n';
 
     for (auto &FeatureValues : RowsFeatureValues) {
       Out += getFileName(FeatureValues["Module"]) + '|' +
@@ -514,13 +587,35 @@ public:
     TempOutput = Out;
   }
 
-  void printOutput() { ModelDataCollector::setOutput(TempOutput); }
+  void printOutput(LLVMContext &Context, StringRef Header = "") {
+    if (Header.empty())
+      Header = OutputHeader;
+    std::string FileName = getOutputFileName();
+    if (FileName.empty() || FileName == "-" || isEmptyOutputFile()) {
+      ModelDataCollector::setOutput(Header.str() + TempOutput);
+      return;
+    }
+
+    auto Buffer = MemoryBuffer::getFile(FileName, /*IsText=*/true,
+                                        /*RequiresNullTerminator=*/false);
+    if (!Buffer) {
+      Context.emitError("cannot read Protean dump header from '" + FileName +
+                        "': " + Buffer.getError().message());
+      return;
+    }
+    if (!(*Buffer)->getBuffer().starts_with(Header)) {
+      Context.emitError("Protean dump header mismatch in '" + FileName + "'");
+      return;
+    }
+    ModelDataCollector::setOutput(TempOutput);
+  }
 
   bool getOnlyMandatory() { return OnlyMandatory; }
 
 private:
   bool OnlyMandatory = false;
   std::string TempOutput = "";
+  std::string OutputHeader;
   std::vector<std::unordered_map<std::string, std::string>> RowsFeatureValues;
 };
 
@@ -733,11 +828,11 @@ const llvm::EnumeratedArray<std::string, ProteanCollectFeatures::FeatureIndex,
                     "average_load_instructions_per_function");
       REGISTER_NAME(AverageStoreInstructionsPerFunction,
                     "average_store_instructions_per_function");
-      REGISTER_NAME(SCCSize, "scc_size");
+      REGISTER_NAME(SCCCount, "scc_count");
       REGISTER_NAME(AverageComponentSize, "average_component_size");
       REGISTER_NAME(NumOfFeatures, "num_features");
-      REGISTER_NAME(TripCount, "TripCount");
-      REGISTER_NAME(MaxTripCount, "MaxTripCount");
+      REGISTER_NAME(MinKnownTripCount, "MinKnownTripCount");
+      REGISTER_NAME(MaxKnownTripCount, "MaxKnownTripCount");
       REGISTER_NAME(LoopSize, "Size");
       REGISTER_NAME(InitialIVValueInt, "InitialIVValueInt");
       REGISTER_NAME(FinalIVValueInt, "FinalIVValueInt");
@@ -849,8 +944,8 @@ const llvm::EnumeratedArray<ProteanCollectFeatures::Scope,
       REGISTER_SCOPE(IsInInnerLoop, CallSite);
       REGISTER_SCOPE(IsMustTailCall, CallSite);
       REGISTER_SCOPE(IsTailCall, CallSite);
-      REGISTER_SCOPE(TripCount, Loop);
-      REGISTER_SCOPE(MaxTripCount, Loop);
+      REGISTER_SCOPE(MinKnownTripCount, Loop);
+      REGISTER_SCOPE(MaxKnownTripCount, Loop);
       REGISTER_SCOPE(IsFixedTripCount, Loop);
       REGISTER_SCOPE(LoopSize, Loop);
       REGISTER_SCOPE(InitialIVValueInt, Loop);
@@ -885,7 +980,7 @@ const llvm::EnumeratedArray<ProteanCollectFeatures::Scope,
       REGISTER_SCOPE(AverageInstructionsPerFunction, Module);
       REGISTER_SCOPE(AverageLoadInstructionsPerFunction, Module);
       REGISTER_SCOPE(AverageStoreInstructionsPerFunction, Module);
-      REGISTER_SCOPE(SCCSize, Function);
+      REGISTER_SCOPE(SCCCount, Function);
       REGISTER_SCOPE(AverageComponentSize, Function);
       REGISTER_SCOPE(LoopCount, Module);
 
@@ -989,8 +1084,8 @@ const llvm::EnumeratedArray<ProteanCollectFeatures::GroupID,
       REGISTER_GROUP(
           ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
           ProteanFIExtendedFeatures);
-      REGISTER_GROUP(TripCount, TripCountFeatures);
-      REGISTER_GROUP(MaxTripCount, TripCountFeatures);
+      REGISTER_GROUP(MinKnownTripCount, TripCountFeatures);
+      REGISTER_GROUP(MaxKnownTripCount, TripCountFeatures);
       REGISTER_GROUP(IsFixedTripCount, TripCountFeatures);
       REGISTER_GROUP(InitialIVValueInt, IVRelatedFeatures);
       REGISTER_GROUP(FinalIVValueInt, IVRelatedFeatures);
@@ -1024,7 +1119,7 @@ const llvm::EnumeratedArray<ProteanCollectFeatures::GroupID,
       REGISTER_GROUP(AverageInstructionsPerFunction, ModuleInfoCount);
       REGISTER_GROUP(AverageLoadInstructionsPerFunction, ModuleInfoCount);
       REGISTER_GROUP(AverageStoreInstructionsPerFunction, ModuleInfoCount);
-      REGISTER_GROUP(SCCSize, FunctionInfo);
+      REGISTER_GROUP(SCCCount, FunctionInfo);
       REGISTER_GROUP(AverageComponentSize, FunctionInfo);
       return Result;
     }();
@@ -1166,8 +1261,8 @@ const llvm::EnumeratedArray<ProteanCollectFeatures::CalculateFeatureFunction,
       REGISTER_FUNCTION(IsInInnerLoop, calculateIsInInnerLoop);
       REGISTER_FUNCTION(IsMustTailCall, calculateIsMustTailCall);
       REGISTER_FUNCTION(IsTailCall, calculateIsTailCall);
-      REGISTER_FUNCTION(TripCount, calculateTripCount);
-      REGISTER_FUNCTION(MaxTripCount, calculateTripCount);
+      REGISTER_FUNCTION(MinKnownTripCount, calculateTripCount);
+      REGISTER_FUNCTION(MaxKnownTripCount, calculateTripCount);
       REGISTER_FUNCTION(LoopSize, calculateLoopSize);
       REGISTER_FUNCTION(InitialIVValueInt, calculateIVValueFeatures);
       REGISTER_FUNCTION(FinalIVValueInt, calculateIVValueFeatures);
@@ -1206,7 +1301,7 @@ const llvm::EnumeratedArray<ProteanCollectFeatures::CalculateFeatureFunction,
                         calculateModuleInfoCount);
       REGISTER_FUNCTION(AverageStoreInstructionsPerFunction,
                         calculateModuleInfoCount);
-      REGISTER_FUNCTION(SCCSize, calculateFunctionInfo);
+      REGISTER_FUNCTION(SCCCount, calculateFunctionInfo);
       REGISTER_FUNCTION(AverageComponentSize, calculateFunctionInfo);
       return Result;
     }();
@@ -1349,6 +1444,14 @@ std::vector<std::string> ProteanCollectFeatures::getAllFeatures() {
   return Res;
 }
 
+// Explicitly set a group of features as unavailable.
+static void setZeroFeatures(ProteanCollectFeatures &ACF,
+                            const ProteanCollectFeatures::FeatureInfo &Info,
+                            ProteanCollectFeatures::GroupID Group) {
+  for (auto Idx : ProteanCollectFeatures::getGroupFeatures(Group))
+    ACF.setFeatureValueAndInfo(Idx, Info, "0");
+}
+
 void calculateFPIRelated(ProteanCollectFeatures &ACF,
                          const ProteanCollectFeatures::FeatureInfo &Info) {
   assert(Info.Idx == ProteanCollectFeatures::FeatureIndex::NumOfFeatures ||
@@ -1357,19 +1460,24 @@ void calculateFPIRelated(ProteanCollectFeatures &ACF,
   auto *FAM = Info.Managers.FAM;
   auto *F = Info.SI.F;
 
+  if (!F || F->isDeclaration()) {
+    setZeroFeatures(ACF, Info, ProteanCollectFeatures::GroupID::FPIRelated);
+    return;
+  }
+
   assert(F && FAM && "Function or FAM is nullptr");
 
   auto &FPI = FAM->getResult<FunctionPropertiesAnalysis>(*F);
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::BasicBlockCount, Info,
-      std::to_string(FPI.BasicBlockCount));
+      featureToString(FPI.BasicBlockCount));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::
           BlocksReachedFromConditionalInstruction,
-      Info, std::to_string(FPI.BlocksReachedFromConditionalInstruction));
+      Info, featureToString(FPI.BlocksReachedFromConditionalInstruction));
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::Uses, Info,
-                             std::to_string(FPI.Uses));
+                             featureToString(FPI.Uses));
 }
 
 void calculateCallerBlockFreq(ProteanCollectFeatures &ACF,
@@ -1394,7 +1502,7 @@ void calculateCallerBlockFreq(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::CallerBlockFreq, Info,
-      std::to_string(CallerBlockFreq));
+      featureToString(CallerBlockFreq));
 }
 
 static CallBase *getInlinableCS(Instruction &I) {
@@ -1424,7 +1532,7 @@ void calculateCallSiteHeight(ProteanCollectFeatures &ACF,
   if (IA) {
     ACF.setFeatureValueAndInfo(
         ProteanCollectFeatures::FeatureIndex::CallSiteHeight, Info,
-        std::to_string(IA->getCallSiteHeight(CB)));
+        featureToString(IA->getCallSiteHeight(CB)));
     return;
   }
   LLVM_DEBUG(dbgs() << "IA was nullptr & callsite height is not set!\n");
@@ -1449,7 +1557,7 @@ void calculateConstantParam(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::ConstantParam, Info,
-      std::to_string(NrCtantParams));
+      featureToString(NrCtantParams));
 }
 
 void calculateCostEstimate(ProteanCollectFeatures &ACF,
@@ -1466,8 +1574,13 @@ void calculateCostEstimate(ProteanCollectFeatures &ACF,
 
   assert(CB && FAM && "CallBase or FAM is nullptr");
 
-  auto &Callee = *CB->getCalledFunction();
-  auto &TIR = FAM->getResult<TargetIRAnalysis>(Callee);
+  Function *Callee = CB->getCalledFunction();
+  if (!Callee || Callee->isDeclaration()) {
+    ACF.setFeatureValueAndInfo(
+        ProteanCollectFeatures::FeatureIndex::CostEstimate, Info, "0");
+    return;
+  }
+  auto &TIR = FAM->getResult<TargetIRAnalysis>(*Callee);
 
   auto GetAssumptionCache = [&](Function &F) -> AssumptionCache & {
     return FAM->getResult<AssumptionAnalysis>(F);
@@ -1480,7 +1593,7 @@ void calculateCostEstimate(ProteanCollectFeatures &ACF,
     CostEstimate = *IsCallSiteInlinable;
 
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::CostEstimate,
-                             Info, std::to_string(CostEstimate));
+                             Info, featureToString(CostEstimate));
 }
 
 static int64_t getLocalCalls(Function &F, FunctionAnalysisManager &FAM) {
@@ -1506,17 +1619,17 @@ void calculateEdgeNodeCount(ProteanCollectFeatures &ACF,
   int NodeCount = 0;
   int EdgeCount = 0;
   for (auto &F : *M) {
-    bool Cond =
-        (F.isDeclaration()) || ((F.size() == 1) && (F.front().size() == 1) &&
-                                (isa<UnreachableInst>(F.front().front())));
+    bool Cond = (F.isDeclaration()) ||
+                ((F.size() == 1) && (F.front().sizeWithoutDebug() == 1) &&
+                 (isa<UnreachableInst>(F.front().getTerminator())));
     if (!Cond) {
       ++NodeCount;
       EdgeCount += getLocalCalls(F, *FAM);
     }
   }
 
-  std::string EdgeCountStr = std::to_string(EdgeCount);
-  std::string NodeCountStr = std::to_string(NodeCount);
+  std::string EdgeCountStr = featureToString(EdgeCount);
+  std::string NodeCountStr = featureToString(NodeCount);
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::EdgeCount,
                              Info, EdgeCountStr);
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::NodeCount,
@@ -1535,19 +1648,25 @@ void calculateFunctionInfo(ProteanCollectFeatures &ACF,
 
   auto *F = Info.SI.F;
 
-  int SCCSize = 0;
+  if (!F || F->isDeclaration()) {
+    setZeroFeatures(ACF, Info, ProteanCollectFeatures::GroupID::FunctionInfo);
+    return;
+  }
+
+  // Unreachable blocks are not counted in this traversal.
+  int SCCCount = 0;
   double AverageComponentSize = 0;
   for (scc_iterator<Function *> I = scc_begin(F); I != scc_end(F); ++I) {
-    SCCSize += 1;
-    AverageComponentSize += std::distance(I->begin(), I->end());
+    ++SCCCount;
+    AverageComponentSize += I->size();
   }
-  AverageComponentSize /= SCCSize;
+  AverageComponentSize /= SCCCount;
 
-  std::string SCCSizeStr = std::to_string(SCCSize);
-  std::string AverageComponentSizeStr = std::to_string(AverageComponentSize);
+  std::string SCCCountStr = featureToString(SCCCount);
+  std::string AverageComponentSizeStr = featureToString(AverageComponentSize);
 
-  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::SCCSize,
-                             Info, SCCSizeStr);
+  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::SCCCount,
+                             Info, SCCCountStr);
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::AverageComponentSize, Info,
       AverageComponentSizeStr);
@@ -1587,7 +1706,7 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
       LoopInfo &LI = FAM->getResult<LoopAnalysis>(F);
       LoopCount += std::distance(LI.begin(), LI.end());
       for (BasicBlock &BB : F) {
-        InstructionCount += std::distance(BB.begin(), BB.end());
+        InstructionCount += BB.sizeWithoutDebug();
         TotalEdgeCount +=
             std::distance(successors(&BB).begin(), successors(&BB).end());
         for (Instruction &I : BB) {
@@ -1599,13 +1718,9 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
             StoreInstructionCount += 1;
           }
           // Function Calls Count
-          if (auto *CB = dyn_cast<CallBase>(&I)) {
-            if (Function *Callee = CB->getCalledFunction()) {
-              if (!Callee->isDeclaration()) {
-                FunctionCalls += 1;
-              }
-            }
-          }
+          if (auto *CB = dyn_cast<CallBase>(&I))
+            if (isOrdinaryCall(*CB))
+              ++FunctionCalls;
         }
 
         int PredCount = std::distance(pred_begin(&BB), pred_end(&BB));
@@ -1618,51 +1733,60 @@ void calculateModuleInfoCount(ProteanCollectFeatures &ACF,
             }
           }
         }
-        BBCount += std::distance(F.begin(), F.end());
-        CallsPerFunction.push_back(FunctionCalls);
       }
+      BBCount += std::distance(F.begin(), F.end());
+      CallsPerFunction.push_back(FunctionCalls);
     }
   }
   // Function Calls Analysis
   std::sort(CallsPerFunction.begin(), CallsPerFunction.end());
-  int MedianCallsPerFunction = 0;
+  double MedianCallsPerFunction = 0;
   if (!CallsPerFunction.empty()) {
-    MedianCallsPerFunction = CallsPerFunction[FunctionCount / 2];
+    if (FunctionCount % 2 == 0)
+      MedianCallsPerFunction =
+          (static_cast<double>(CallsPerFunction[FunctionCount / 2 - 1]) +
+           CallsPerFunction[FunctionCount / 2]) /
+          2;
+    else
+      MedianCallsPerFunction = CallsPerFunction[FunctionCount / 2];
   }
   int TotalFunctionCalls = 0;
   for (int Calls : CallsPerFunction) {
     TotalFunctionCalls += Calls;
   }
   // Average per Function Analysis
-  double AverageCallsPerFunction = 1.0 * TotalFunctionCalls / FunctionCount;
-  double AverageBBPerFunction = 1.0 * BBCount / FunctionCount;
-  double AverageInstructionCount = 1.0 * InstructionCount / FunctionCount;
+  double AverageCallsPerFunction =
+      (FunctionCount == 0) ? 0 : 1.0 * TotalFunctionCalls / FunctionCount;
+  double AverageBBPerFunction =
+      (FunctionCount == 0) ? 0 : 1.0 * BBCount / FunctionCount;
+  double AverageInstructionCount =
+      (FunctionCount == 0) ? 0 : 1.0 * InstructionCount / FunctionCount;
   double AverageLoadInstructionCount =
-      1.0 * LoadInstructionCount / FunctionCount;
+      (FunctionCount == 0) ? 0 : 1.0 * LoadInstructionCount / FunctionCount;
   double AverageStoreInstructionCount =
-      1.0 * StoreInstructionCount / FunctionCount;
+      (FunctionCount == 0) ? 0 : 1.0 * StoreInstructionCount / FunctionCount;
   int GlobalVariableCount =
       std::distance(M->globals().begin(), M->globals().end());
 
-  std::string FunctionCountStr = std::to_string(FunctionCount);
-  std::string BBCountStr = std::to_string(BBCount);
-  std::string AverageBBPerFunctionStr = std::to_string(AverageBBPerFunction);
-  std::string InstructionCountStr = std::to_string(InstructionCount);
-  std::string TotalFunctionCallsStr = std::to_string(TotalFunctionCalls);
+  std::string FunctionCountStr = featureToString(FunctionCount);
+  std::string BBCountStr = featureToString(BBCount);
+  std::string AverageBBPerFunctionStr = featureToString(AverageBBPerFunction);
+  std::string InstructionCountStr = featureToString(InstructionCount);
+  std::string TotalFunctionCallsStr = featureToString(TotalFunctionCalls);
   std::string AverageCallsPerFunctionStr =
-      std::to_string(AverageCallsPerFunction);
+      featureToString(AverageCallsPerFunction);
   std::string MedianCallsPerFunctionStr =
-      std::to_string(MedianCallsPerFunction);
-  std::string LoopCountStr = std::to_string(LoopCount);
-  std::string TotalEdgeCountStr = std::to_string(TotalEdgeCount);
-  std::string CriticalEdgeCountStr = std::to_string(CriticalEdgeCount);
-  std::string GlobalVariableCountStr = std::to_string(GlobalVariableCount);
+      featureToString(MedianCallsPerFunction);
+  std::string LoopCountStr = featureToString(LoopCount);
+  std::string TotalEdgeCountStr = featureToString(TotalEdgeCount);
+  std::string CriticalEdgeCountStr = featureToString(CriticalEdgeCount);
+  std::string GlobalVariableCountStr = featureToString(GlobalVariableCount);
   std::string AverageInstructionCountStr =
-      std::to_string(AverageInstructionCount);
+      featureToString(AverageInstructionCount);
   std::string LoadInstructionCountStr =
-      std::to_string(AverageLoadInstructionCount);
+      featureToString(AverageLoadInstructionCount);
   std::string StoreInstructionCountStr =
-      std::to_string(AverageStoreInstructionCount);
+      featureToString(AverageStoreInstructionCount);
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::FunctionCount, Info,
@@ -1734,12 +1858,12 @@ void calculateHotColdCallSite(ProteanCollectFeatures &ACF,
       CallerBFI.getBlockFreq(&(CB->getCaller()->getEntryBlock()));
   bool ColdCallSite = CallSiteFreq < CallerEntryFreq * ColdProb;
   auto CallerEntryFreqHot = CallerBFI.getEntryFreq().getFrequency();
-  bool HotCallSite = (CallSiteFreq.getFrequency() >= CallerEntryFreqHot * 60);
+  bool HotCallSite = (CallSiteFreq.getFrequency() / 60 >= CallerEntryFreqHot);
 
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::ColdCallSite,
-                             Info, std::to_string(ColdCallSite));
+                             Info, featureToString(ColdCallSite));
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::HotCallSite,
-                             Info, std::to_string(HotCallSite));
+                             Info, featureToString(HotCallSite));
 }
 
 void calculateLoopLevel(ProteanCollectFeatures &ACF,
@@ -1760,9 +1884,9 @@ void calculateLoopLevel(ProteanCollectFeatures &ACF,
   BasicBlock *BB = CB->getParent();
   LoopInfo &LI = FAM->getResult<LoopAnalysis>(*F);
 
-  std::string OptCode = std::to_string(CB->getOpcode());
+  std::string OptCode = featureToString(CB->getOpcode());
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::LoopLevel,
-                             Info, std::to_string(LI.getLoopDepth(BB)));
+                             Info, featureToString(LI.getLoopDepth(BB)));
 }
 
 InlineAdvisor::MandatoryInliningKind
@@ -1786,13 +1910,20 @@ void calculateMandatoryKind(ProteanCollectFeatures &ACF,
 
   assert(CB && FAM && "CallBase or FAM is nullptr");
 
+  Function *Callee = CB->getCalledFunction();
+  if (!Callee || Callee->isDeclaration()) {
+    ACF.setFeatureValueAndInfo(
+        ProteanCollectFeatures::FeatureIndex::MandatoryKind, Info, "0");
+    return;
+  }
+
   auto &Caller = *CB->getCaller();
   auto &ORE = FAM->getResult<OptimizationRemarkEmitterAnalysis>(Caller);
   auto MandatoryKind = ProteanCollectFeatures::getMandatoryKind(*CB, *FAM, ORE);
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::MandatoryKind, Info,
-      std::to_string((int)MandatoryKind));
+      featureToString((int)MandatoryKind));
 }
 
 void calculateMandatoryOnly(ProteanCollectFeatures &ACF,
@@ -1806,7 +1937,7 @@ void calculateMandatoryOnly(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::MandatoryOnly, Info,
-      std::to_string((int)Info.II.MandatoryOnly));
+      featureToString((int)Info.II.MandatoryOnly));
 }
 
 void calculateOptCode(ProteanCollectFeatures &ACF,
@@ -1822,7 +1953,7 @@ void calculateOptCode(ProteanCollectFeatures &ACF,
 
   assert(CB && "CallBase is nullptr");
 
-  std::string OptCode = std::to_string(CB->getOpcode());
+  std::string OptCode = featureToString(CB->getOpcode());
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::OptCode,
                              Info, OptCode);
 }
@@ -1844,8 +1975,13 @@ void calculateInlineCostFeatures(
 
   assert(CB && FAM && "CallBase or FAM is nullptr");
 
-  auto &Callee = *CB->getCalledFunction();
-  auto &TIR = FAM->getResult<TargetIRAnalysis>(Callee);
+  Function *Callee = CB->getCalledFunction();
+  if (!Callee || Callee->isDeclaration()) {
+    setZeroFeatures(ACF, Info,
+                    ProteanCollectFeatures::GroupID::InlineCostFeatureGroup);
+    return;
+  }
+  auto &TIR = FAM->getResult<TargetIRAnalysis>(*Callee);
 
   auto GetAssumptionCache = [&](Function &F) -> AssumptionCache & {
     return FAM->getResult<AssumptionAnalysis>(F);
@@ -1915,7 +2051,7 @@ void calculateInlineCostFeatures(
     size_t TmpIdx = static_cast<size_t>(TmpIdxs[i]);
     ACF.setFeatureValueAndInfo(
         Idx, Info,
-        std::to_string(CostFeaturesOpt ? CostFeaturesOpt.value()[TmpIdx] : 0));
+        featureToString(CostFeaturesOpt ? CostFeaturesOpt.value()[TmpIdx] : 0));
   }
 }
 
@@ -1935,8 +2071,13 @@ void calculateThreshold(ProteanCollectFeatures &ACF,
 
   assert(CB && FAM && "CallBase or FAM is nullptr");
 
-  auto &Callee = *CB->getCalledFunction();
-  auto &TIR = FAM->getResult<TargetIRAnalysis>(Callee);
+  Function *Callee = CB->getCalledFunction();
+  if (!Callee || Callee->isDeclaration()) {
+    setZeroFeatures(ACF, Info,
+                    ProteanCollectFeatures::GroupID::ThresholdFeatureGroup);
+    return;
+  }
+  auto &TIR = FAM->getResult<TargetIRAnalysis>(*Callee);
 
   auto GetAssumptionCache = [&](Function &F) -> AssumptionCache & {
     return FAM->getResult<AssumptionAnalysis>(F);
@@ -1947,10 +2088,10 @@ void calculateThreshold(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::Threshold, Info,
-      std::to_string(CostFeaturesOpt
-                         ? CostFeaturesOpt.value()[static_cast<size_t>(
-                               InlineCostFeatureIndex::threshold)]
-                         : 0));
+      featureToString(CostFeaturesOpt
+                          ? CostFeaturesOpt.value()[static_cast<size_t>(
+                                InlineCostFeatureIndex::threshold)]
+                          : 0));
 }
 
 static void
@@ -2082,8 +2223,15 @@ void calculateProteanFIExtendedFeaturesFeatures(
 
   auto F = Info.SI.F;
   auto *FAM = Info.Managers.FAM;
+  auto *IA = Info.II.IA;
 
-  assert(F && FAM && "F or FAM is nullptr");
+  if (!F || F->isDeclaration()) {
+    setZeroFeatures(ACF, Info,
+                    ProteanCollectFeatures::GroupID::ProteanFIExtendedFeatures);
+    return;
+  }
+
+  assert(F && FAM && IA && "F, FAM or IA is nullptr");
 
   struct ProteanFIExtendedFeatures::FunctionFeatures FF;
   auto &DomTree = FAM->getResult<DominatorTreeAnalysis>(*F);
@@ -2094,7 +2242,7 @@ void calculateProteanFIExtendedFeaturesFeatures(
   bool ValidTree = false;
   checkValidFFCache(*F, FF, DomTree, TTI, LI, ValidSize, ValidLoop, ValidTree);
   FF = ProteanFIExtendedFeatures::getFunctionFeatures(
-      *F, DomTree, TTI, LI, *FAM, ValidSize, ValidLoop, ValidTree);
+      *F, DomTree, TTI, LI, *FAM, *IA, ValidSize, ValidLoop, ValidTree);
   getCachedFF(*F, FF, DomTree, TTI, LI);
   updateCachedFF(*F, FF, DomTree, TTI, LI);
   const auto ProteanNamedFeaturesBegin = ProteanCollectFeatures::FeatureIndex::
@@ -2111,14 +2259,14 @@ void calculateProteanFIExtendedFeaturesFeatures(
     size_t TmpIdx = static_cast<size_t>(Idx) -
                     static_cast<size_t>(ProteanNamedFeaturesBegin) - 1;
     ACF.setFeatureValueAndInfo(Idx, Info,
-                               std::to_string(FF.NamedFeatures[TmpIdx]));
+                               featureToString(FF.NamedFeatures[TmpIdx]));
   }
   for (auto Idx = ProteanFloatFeaturesBegin + 1; Idx != ProteanFloatFeaturesEnd;
        ++Idx) {
     size_t TmpIdx = static_cast<size_t>(Idx) -
                     static_cast<size_t>(ProteanFloatFeaturesBegin) - 1;
     ACF.setFeatureValueAndInfo(Idx, Info,
-                               std::to_string(FF.NamedFloatFeatures[TmpIdx]));
+                               featureToString(FF.NamedFloatFeatures[TmpIdx]));
   }
 }
 
@@ -2140,7 +2288,7 @@ void calculateIVValueFeatures(ProteanCollectFeatures &ACF,
   auto &SE = AR->SE;
   auto *IndVar = L->getInductionVariable(SE);
 
-  int InitialIVValueInt = 0, FinalIVValueInt = 0, StepValueInt = 0;
+  int64_t InitialIVValueInt = 0, FinalIVValueInt = 0, StepValueInt = 0;
   if (auto LoopBound = L->getBounds(SE)) {
     if (auto Bound = LoopBound->getBounds(*L, *IndVar, SE)) {
       Value &InitialIVValue = Bound->getInitialIVValue();
@@ -2157,12 +2305,12 @@ void calculateIVValueFeatures(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::InitialIVValueInt, Info,
-      std::to_string(InitialIVValueInt));
+      featureToString(InitialIVValueInt));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::FinalIVValueInt, Info,
-      std::to_string(FinalIVValueInt));
+      featureToString(FinalIVValueInt));
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::StepValueInt,
-                             Info, std::to_string(StepValueInt));
+                             Info, featureToString(StepValueInt));
 }
 
 void calculateInnerOuterMostLoop(
@@ -2184,10 +2332,10 @@ void calculateInnerOuterMostLoop(
   bool IsOuterMostLoop = L->isOutermost();
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IsInnerMostLoop, Info,
-      std::to_string(IsInnerMostLoop));
+      featureToString(IsInnerMostLoop));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IsOuterMostLoop, Info,
-      std::to_string(IsOuterMostLoop));
+      featureToString(IsOuterMostLoop));
 }
 
 void calculateLoopInstFeatures(
@@ -2211,7 +2359,7 @@ void calculateLoopInstFeatures(
   int TotBlocksPerLoopNest = 0;
   for (auto *LB : L->getBlocks()) {
     TotBlocksPerLoopNest++;
-    for (Instruction &Inst : *LB) {
+    for (Instruction &Inst : LB->instructionsWithoutDebug()) {
       TotLoopNestInstCount++;
       if (isa<LoadInst>(Inst))
         NumLoadInstPerLoopNest++;
@@ -2232,16 +2380,22 @@ void calculateLoopInstFeatures(
   std::vector<Loop *> SL = L->getSubLoops();
   if (!SL.empty()) {
     for (auto *LB : L->getBlocks()) {
-      for (auto *BBSL : SL) {
-        if (!BBSL->contains(LB)) {
-          TotBlocksPerLoop++;
-          for (Instruction &Inst : *LB) {
-            TotLoopInstCount++;
-            if (isa<LoadInst>(Inst))
-              NumLoadInstPerLoop++;
-            if (isa<StoreInst>(Inst))
-              NumStoreInstPerLoop++;
-          }
+      bool NotInSubLoop = true;
+      for (auto *SubSL : SL) {
+        if (SubSL->contains(LB)) {
+          NotInSubLoop = false;
+          break;
+        }
+      }
+
+      if (NotInSubLoop) {
+        TotBlocksPerLoop++;
+        for (Instruction &Inst : LB->instructionsWithoutDebug()) {
+          TotLoopInstCount++;
+          if (isa<LoadInst>(Inst))
+            NumLoadInstPerLoop++;
+          if (isa<StoreInst>(Inst))
+            NumStoreInstPerLoop++;
         }
       }
     }
@@ -2259,31 +2413,31 @@ void calculateLoopInstFeatures(
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::TotLoopInstCount, Info,
-      std::to_string(TotLoopInstCount));
+      featureToString(TotLoopInstCount));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::NumLoadInstPerLoop, Info,
-      std::to_string(NumLoadInstPerLoop));
+      featureToString(NumLoadInstPerLoop));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::NumStoreInstPerLoop, Info,
-      std::to_string(NumStoreInstPerLoop));
+      featureToString(NumStoreInstPerLoop));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::AvgNumLoadInstPerLoop, Info,
-      std::to_string(AvgNumLoadInstPerLoop));
+      featureToString(AvgNumLoadInstPerLoop));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::TotBlocksPerLoop, Info,
-      std::to_string(TotBlocksPerLoop));
+      featureToString(TotBlocksPerLoop));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::TotLoopNestInstCount, Info,
-      std::to_string(TotLoopNestInstCount));
+      featureToString(TotLoopNestInstCount));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::NumLoadInstPerLoopNest, Info,
-      std::to_string(NumLoadInstPerLoopNest));
+      featureToString(NumLoadInstPerLoopNest));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::NumStoreInstPerLoopNest, Info,
-      std::to_string(NumStoreInstPerLoopNest));
+      featureToString(NumStoreInstPerLoopNest));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::AvgNumLoadInstPerLoopNest, Info,
-      std::to_string(AvgNumLoadInstPerLoopNest));
+      featureToString(AvgNumLoadInstPerLoopNest));
 }
 
 void calculateLoopHeight(ProteanCollectFeatures &ACF,
@@ -2306,7 +2460,7 @@ void calculateLoopHeight(ProteanCollectFeatures &ACF,
   while (!SLoops.empty()) {
     unsigned Size = SLoops.size();
     for (unsigned I = 0; I < Size; ++I) {
-      Loop *VisitingLoop = SLoops.back();
+      Loop *VisitingLoop = SLoops.front();
       SLoops.pop();
       for (auto *ChildLoop : VisitingLoop->getSubLoops())
         SLoops.push(ChildLoop);
@@ -2316,7 +2470,7 @@ void calculateLoopHeight(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::MaxLoopHeight, Info,
-      std::to_string(MaxLoopHeight));
+      featureToString(MaxLoopHeight));
 }
 
 void calculateLoopSetSize(ProteanCollectFeatures &ACF,
@@ -2347,7 +2501,7 @@ void calculateLoopSetSize(ProteanCollectFeatures &ACF,
   int NumPartitions = 0;
   float AvgStoreSetSize = 0, AvgNumInsts = 0;
   size_t IndVarSetSize = 0;
-  if (!LPG.createLoopPartitions()) {
+  if (LPG.createLoopPartitions()) {
     size_t TotalStoreSetSize = 0, TotalNumInsts = 0;
     NumPartitions = LPG.getNumNodes();
     IndVarSetSize = LPG.getIndVarSet().size();
@@ -2366,15 +2520,15 @@ void calculateLoopSetSize(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::AvgStoreSetSize, Info,
-      std::to_string(AvgStoreSetSize));
+      featureToString(AvgStoreSetSize));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IndVarSetSize, Info,
-      std::to_string(IndVarSetSize));
+      featureToString(IndVarSetSize));
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::AvgNumInsts,
-                             Info, std::to_string(AvgNumInsts));
+                             Info, featureToString(AvgNumInsts));
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::NumPartitions, Info,
-      std::to_string(NumPartitions));
+      featureToString(NumPartitions));
 }
 
 void calculateTripCount(ProteanCollectFeatures &ACF,
@@ -2393,27 +2547,31 @@ void calculateTripCount(ProteanCollectFeatures &ACF,
   assert(AR && L && "AR or L is nullptr");
 
   auto &SE = AR->SE;
-  unsigned TripCount = 0;
   SmallVector<BasicBlock *, 8> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
-  for (BasicBlock *ExitingBlock : ExitingBlocks)
-    if (unsigned TC = SE.getSmallConstantTripCount(L, ExitingBlock))
-      if (!TripCount || TC < TripCount)
-        TripCount = TC;
+  unsigned MinKnownTripCount = 0, MaxKnownTripCount = 0;
 
-  unsigned MaxTripCount = 0;
-  if (!TripCount) {
-    MaxTripCount = SE.getSmallConstantMaxTripCount(L);
-  }
-  bool IsFixedTripCount = (TripCount != 0) ? true : false;
+  // Loops without exits do not have a fixed trip count.
+  bool IsFixedTripCount = !ExitingBlocks.empty();
+  for (BasicBlock *ExitingBlock : ExitingBlocks)
+    if (unsigned TC = SE.getSmallConstantTripCount(L, ExitingBlock)) {
+      if (!MinKnownTripCount || TC < MinKnownTripCount)
+        MinKnownTripCount = TC;
+      if (!MaxKnownTripCount || TC > MaxKnownTripCount)
+        MaxKnownTripCount = TC;
+    } else {
+      IsFixedTripCount = false;
+    }
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IsFixedTripCount, Info,
-      std::to_string(IsFixedTripCount));
-  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::TripCount,
-                             Info, std::to_string(TripCount));
-  ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::MaxTripCount,
-                             Info, std::to_string(MaxTripCount));
+      featureToString(IsFixedTripCount));
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::MinKnownTripCount, Info,
+      featureToString(MinKnownTripCount));
+  ACF.setFeatureValueAndInfo(
+      ProteanCollectFeatures::FeatureIndex::MaxKnownTripCount, Info,
+      featureToString(MaxKnownTripCount));
 }
 
 void calculateLoopSize(ProteanCollectFeatures &ACF,
@@ -2440,19 +2598,16 @@ void calculateLoopSize(ProteanCollectFeatures &ACF,
     Metrics.analyzeBasicBlock(BB, TTI, EphValues);
   InstructionCost LoopSize = Metrics.NumInsts;
 
-  // Don't allow an estimate of size zero. This would allows unrolling of loops
-  // with huge iteration counts, which is a compile time problem even if it's
-  // not a problem for code quality. Also, the code using this size may assume
-  // that each loop has at least three instructions (likely a conditional
-  // branch, a comparison feeding that branch, and some kind of loop increment
-  // feeding that comparison instruction).
   if (LoopSize.isValid() && *LoopSize.getValue() < BEInsns + 1) {
     // This is an open coded max() on InstructionCost
     LoopSize = BEInsns + 1;
   }
 
+  std::string Val =
+      LoopSize.isValid() ? featureToString(*LoopSize.getValue()) : "0";
+
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::LoopSize,
-                             Info, std::to_string(*LoopSize.getValue()));
+                             Info, Val);
 }
 
 void calculateIsIndirectCall(ProteanCollectFeatures &ACF,
@@ -2470,7 +2625,7 @@ void calculateIsIndirectCall(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IsIndirectCall, Info,
-      std::to_string(CB->isIndirectCall()));
+      featureToString(CB->isIndirectCall()));
 }
 
 void calculateIsInInnerLoop(ProteanCollectFeatures &ACF,
@@ -2490,18 +2645,12 @@ void calculateIsInInnerLoop(ProteanCollectFeatures &ACF,
   auto &Caller = *CB->getCaller();
   auto &CallerLI = FAM->getResult<LoopAnalysis>(Caller);
 
-  // Get loop for CB's BB. And check whether the loop is an inner most loop.
-  bool CallSiteInInnerLoop = false;
-  for (auto &L : CallerLI) {
-    if (L->isInnermost() && L->contains(CB)) {
-      CallSiteInInnerLoop = true;
-      break;
-    }
-  }
+  auto *L = CallerLI.getLoopFor(CB->getParent());
+  bool CallSiteInInnerLoop = L && L->isInnermost();
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IsInInnerLoop, Info,
-      std::to_string(CallSiteInInnerLoop));
+      featureToString(CallSiteInInnerLoop));
 }
 
 void calculateIsMustTailCall(ProteanCollectFeatures &ACF,
@@ -2519,7 +2668,7 @@ void calculateIsMustTailCall(ProteanCollectFeatures &ACF,
 
   ACF.setFeatureValueAndInfo(
       ProteanCollectFeatures::FeatureIndex::IsMustTailCall, Info,
-      std::to_string(CB->isMustTailCall()));
+      featureToString(CB->isMustTailCall()));
 }
 
 void calculateIsTailCall(ProteanCollectFeatures &ACF,
@@ -2536,7 +2685,7 @@ void calculateIsTailCall(ProteanCollectFeatures &ACF,
   assert(CB && "CallBase is nullptr");
 
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::IsTailCall,
-                             Info, std::to_string(CB->isTailCall()));
+                             Info, featureToString(CB->isTailCall()));
 }
 
 ProteanCollectFeatures::FeatureValueMap ProteanCollectFeatures::getFeaturesPair(
@@ -2822,12 +2971,21 @@ void ProteanFIExtendedFeatures::updateLoopRelatedFeatures(
 
   uint64_t LoopInstrCount = 0;
   uint64_t BlockWithMulSuccNum = 0;
+
+  // Depth metrics must include nested loops.
+  auto AllLoops = LI.getLoopsInPreorder();
   uint64_t LoopLevelSum = 0;
-  for (auto &L : LI) {
+  for (const Loop *L : AllLoops) {
     LoopLevelSum += static_cast<uint64_t>(L->getLoopDepth());
     FF[NamedFeatureIndex::MaxLoopDepth] =
         std::max(FF[NamedFeatureIndex::MaxLoopDepth],
                  static_cast<uint64_t>(L->getLoopDepth()));
+  }
+  if (!AllLoops.empty())
+    FF[NamedFloatFeatureIndex::AvgNestedLoopLevel] =
+        static_cast<float>(LoopLevelSum) / AllLoops.size();
+
+  for (auto &L : LI) {
     for (const BasicBlock *BB : L->getBlocks()) {
       unsigned SuccCount = std::distance(succ_begin(BB), succ_end(BB));
       if (SuccCount > 1)
@@ -2845,9 +3003,6 @@ void ProteanFIExtendedFeatures::updateLoopRelatedFeatures(
     q = BlockWithMulSuccNum / LoopNum;
     FF[NamedFloatFeatureIndex::BlockWithMultipleSuccessorsPerLoop] =
         q + ((float)(BlockWithMulSuccNum - q * LoopNum)) / LoopNum;
-    q = LoopLevelSum / LoopNum;
-    FF[NamedFloatFeatureIndex::AvgNestedLoopLevel] =
-        q + ((float)(LoopLevelSum - q * LoopNum)) / LoopNum;
   }
 }
 
@@ -2879,9 +3034,9 @@ void ProteanFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
     for (auto &I : BB.instructionsWithoutDebug()) {
       if (CallBase *CB = dyn_cast<CallBase>(&I)) {
         Function *Callee = CB->getCalledFunction();
-        if (Callee && !Callee->isIntrinsic()) {
+        if (isOrdinaryCall(*CB)) {
           ++NumCallsite;
-          if (!Callee->isDeclaration()) {
+          if (Callee && !Callee->isDeclaration()) {
             // Check all the functions that was called and get the max block
             // frequency.
             uint64_t EntryFreq = FAM.getResult<BlockFrequencyAnalysis>(*Callee)
@@ -2890,15 +3045,13 @@ void ProteanFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
             MaxCallsiteBlockFreq = std::max(EntryFreq, MaxCallsiteBlockFreq);
           }
 
-          if (Callee != nullptr) {
-            // Collect the number of callsites that were invoked with a pointer
-            // argument.
-            for (auto arg = Callee->arg_begin(); arg != Callee->arg_end();
-                 arg++)
-              if (isa<PointerType>(arg->getType())) {
-                FF[NamedFeatureIndex::PtrCallee]++;
-                break;
-              }
+          // Collect the number of callsites that are invoked with a pointer
+          // argument.
+          for (auto &Arg : CB->args()) {
+            if (isa<PointerType>(Arg->getType())) {
+              FF[NamedFeatureIndex::PtrCallee]++;
+              break;
+            }
           }
 
           // Collect the number of callsites that returns a pointer type.
@@ -2979,8 +3132,8 @@ void ProteanFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
 ProteanFIExtendedFeatures::FunctionFeatures
 ProteanFIExtendedFeatures::getFunctionFeatures(
     Function &F, DominatorTree &DomTree, TargetTransformInfo &TTI, LoopInfo &LI,
-    FunctionAnalysisManager &FAM, bool ValidSize, bool ValidLoop,
-    bool ValidTree) {
+    FunctionAnalysisManager &FAM, InlineAdvisor &IA, bool ValidSize,
+    bool ValidLoop, bool ValidTree) {
   assert(llvm::is_sorted(ImportantInstructionSuccessions) &&
          "expected function features are sorted");
 
@@ -3006,6 +3159,7 @@ ProteanFIExtendedFeatures::getFunctionFeatures(
   if (!ValidTree)
     FF[NamedFeatureIndex::MaxDomTreeLevel] =
         getMaxDominatorTreeDepth(F, DomTree);
+  FF[NamedFeatureIndex::CallerHeight] = IA.getFunctionHeight(F);
   FF[NamedFeatureIndex::CallUsage] = ValidCallAndInLoopCounts.first;
   FF[NamedFeatureIndex::NumOfCallUsesInLoop] = ValidCallAndInLoopCounts.second;
   FF[NamedFeatureIndex::EntryBlockFreq] =
@@ -3044,6 +3198,8 @@ operator++(ProteanFIExtendedFeatures::NamedFloatFeatureIndex &n, int) {
 
 PreservedAnalyses CollectFeaturesPass::run(Module &M,
                                            ModuleAnalysisManager &AM) {
+  ProteanCollectFeatures::clearCache();
+
   LLVM_DEBUG(dbgs() << "Collecting Inlining Features\n");
   FunctionAnalysisManager &FAM =
       AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
@@ -3078,18 +3234,16 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
     for (BasicBlock &BB : F) {
       for (Instruction &I : BB) {
         if (auto *CB = dyn_cast<CallBase>(&I)) {
-          if (Function *Callee = CB->getCalledFunction()) {
-            if (!Callee->isDeclaration()) {
-              MDC.collectFeatures(CB, IA, &FAM, &AM);
-              if (!CallBaseIsCollected) {
-                CallBaseIsCollected = true;
-                MDC.updateOutput(/*PrintHeader*/ true, &M, &F, CB,
-                                 /*L*/ nullptr);
-              }
-              MDC.updateOutput(/*PrintHeader*/ false, &M, &F, CB,
-                               /*L*/ nullptr);
-            }
+          if (!isOrdinaryCall(*CB))
+            continue;
+          MDC.collectFeatures(CB, IA, &FAM, &AM);
+          if (!CallBaseIsCollected) {
+            CallBaseIsCollected = true;
+            MDC.updateOutput(/*PrintHeader*/ true, &M, &F, CB,
+                             /*L*/ nullptr);
           }
+          MDC.updateOutput(/*PrintHeader*/ false, &M, &F, CB,
+                           /*L*/ nullptr);
         }
       }
     }
@@ -3133,7 +3287,7 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
   MDC.formatOutput();
   MDC.addModuleFlags(&M);
   if (FeatureDump)
-    MDC.printOutput();
+    MDC.printOutput(M.getContext());
   return PreservedAnalyses::all();
 }
 
@@ -3151,11 +3305,9 @@ PreservedAnalyses LoopCollectFeaturesPass::run(Loop &L, LoopAnalysisManager &AM,
   Function *F = L.getHeader()->getParent();
   Module *M = F->getParent();
   MDC.collectLoopFeatures(&L, &AR, &AM);
-  if (MDC.isEmptyOutputFile())
-    MDC.updateOutput(/*PrintHeader*/ true, M, F, /*CB*/ nullptr, &L);
   MDC.updateOutput(/*PrintHeader*/ false, M, F, /*CB*/ nullptr, &L);
   if (FeatureDump)
-    MDC.printOutput();
+    MDC.printOutput(M->getContext(), MDC.printHeader(M, F, /*CB=*/nullptr, &L));
   return PreservedAnalyses::all();
 }
 
