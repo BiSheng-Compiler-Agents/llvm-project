@@ -16,6 +16,7 @@
 #ifndef LLVM_ANALYSIS_PROTEANCOLLECTFEATURES_H
 #define LLVM_ANALYSIS_PROTEANCOLLECTFEATURES_H
 
+#include "llvm/ADT/EnumeratedArray.h"
 #include "llvm/Analysis/InlineAdvisor.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -498,15 +499,21 @@ public:
 private:
   // Global mappings.
   // FeatureIndexToName and FeatureIndexToScope should be a one to one mapping.
-  static const std::unordered_map<FeatureIndex, std::string> FeatureIndexToName;
-  static const std::unordered_map<FeatureIndex, Scope> FeatureIndexToScope;
-  static const std::unordered_map<FeatureIndex, GroupID> FeatureIndexToGroup;
+  static const EnumeratedArray<std::string, FeatureIndex,
+                               FeatureIndex::NumOfFeatures>
+      FeatureIndexToName;
+  static const EnumeratedArray<Scope, FeatureIndex, FeatureIndex::NumOfFeatures>
+      FeatureIndexToScope;
+  static const EnumeratedArray<GroupID, FeatureIndex,
+                               FeatureIndex::NumOfFeatures>
+      FeatureIndexToGroup;
   static const std::multimap<GroupID, FeatureIndex> GroupToFeatureIndices;
   static const std::multimap<Scope, FeatureIndex> ScopeToFeatureIndices;
   // The CalculateFeatureMap maps each feature to a corresponding function that
   // calculates the feature and also sets the feature value inside
   // FeatureValues field.
-  static const std::unordered_map<FeatureIndex, CalculateFeatureFunction>
+  static const EnumeratedArray<CalculateFeatureFunction, FeatureIndex,
+                               FeatureIndex::NumOfFeatures>
       CalculateFeatureMap;
 
   // TODO:

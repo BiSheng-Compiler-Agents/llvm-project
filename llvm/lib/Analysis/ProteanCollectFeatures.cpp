@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ProteanCollectFeatures.h"
+#include "llvm/ADT/EnumeratedArray.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
@@ -625,405 +626,421 @@ calculateModuleInfoCount(ProteanCollectFeatures &ACF,
 //          FeatureIdx -> Group, Group -> FeatureIdx
 //          FeatureIdx -> Calculating function
 #define REGISTER_NAME(INDEX_NAME, NAME)                                        \
-  { ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME }
-const std::unordered_map<ProteanCollectFeatures::FeatureIndex, std::string>
-    ProteanCollectFeatures::FeatureIndexToName{
-        REGISTER_NAME(SROASavings, "sroa_savings"),
-        REGISTER_NAME(SROALosses, "sroa_losses"),
-        REGISTER_NAME(LoadElimination, "load_elimination"),
-        REGISTER_NAME(CallPenalty, "call_penalty"),
-        REGISTER_NAME(CallArgumentSetup, "call_argument_setup"),
-        REGISTER_NAME(LoadRelativeIntrinsic, "load_relative_intrinsic"),
-        REGISTER_NAME(LoweredCallArgSetup, "lowered_call_arg_setup"),
-        REGISTER_NAME(IndirectCallPenalty, "indirect_call_penalty"),
-        REGISTER_NAME(JumpTablePenalty, "jump_table_penalty"),
-        REGISTER_NAME(CaseClusterPenalty, "case_cluster_penalty"),
-        REGISTER_NAME(SwitchPenalty, "switch_penalty"),
-        REGISTER_NAME(SwitchDefaultDestPenalty, "switch_default_dest_penalty"),
-        REGISTER_NAME(UnsimplifiedCommonInstructions,
-                      "unsimplified_common_instructions"),
-        REGISTER_NAME(NumLoops, "num_loops"),
-        REGISTER_NAME(DeadBlocks, "dead_blocks"),
-        REGISTER_NAME(SimplifiedInstructions, "simplified_instructions"),
-        REGISTER_NAME(ConstantArgs, "constant_args"),
-        REGISTER_NAME(ConstantOffsetPtrArgs, "constant_offset_ptr_args"),
-        REGISTER_NAME(CallSiteCost, "callsite_cost"),
-        REGISTER_NAME(ColdCcPenalty, "cold_cc_penalty"),
-        REGISTER_NAME(LastCallToStaticBonus, "last_call_to_static_bonus"),
-        REGISTER_NAME(IsMultipleBlocks, "is_multiple_blocks"),
-        REGISTER_NAME(NestedInlines, "nested_inlines"),
-        REGISTER_NAME(NestedInlineCostEstimate, "nested_inline_cost_estimate"),
-        REGISTER_NAME(Threshold, "threshold"),
-        REGISTER_NAME(BasicBlockCount, "basic_block_count"),
-        REGISTER_NAME(BlocksReachedFromConditionalInstruction,
-                      "conditionally_executed_blocks"),
-        REGISTER_NAME(Uses, "users"),
-        REGISTER_NAME(EdgeCount, "edge_count"),
-        REGISTER_NAME(NodeCount, "node_count"),
-        REGISTER_NAME(ColdCallSite, "cold_callsite"),
-        REGISTER_NAME(HotCallSite, "hot_callsite"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesInitialSize, "InitialSize"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesBlocks, "Blocks"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesCalls, "Calls"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesIsLocal, "IsLocal"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesIsLinkOnceODR, "IsLinkOnceODR"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesIsLinkOnce, "IsLinkOnce"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesLoops, "Loops"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesMaxLoopDepth, "MaxLoopDepth"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesMaxDomTreeLevel,
-                      "MaxDomTreeLevel"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesPtrArgs, "PtrArgs"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesPtrCallee, "PtrCallee"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesCallReturnPtr, "CallReturnPtr"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesConditionalBranch,
-                      "ConditionalBranch"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesCBwithArg, "CBwithArg"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesCallerHeight, "CallerHeight"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesCallUsage, "CallUsage"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesIsRecursive, "IsRecursive"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesNumCallsiteInLoop,
-                      "NumCallsiteInLoop"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesNumOfCallUsesInLoop,
-                      "NumOfCallUsesInLoop"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesEntryBlockFreq,
-                      "EntryBlockFreq"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq,
-                      "MaxCallsiteBlockFreq"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesInstructionPerBlock,
-                      "InstructionPerBlock"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesSuccessorPerBlock,
-                      "SuccessorPerBlock"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesAvgVecInstr, "AvgVecInstr"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesAvgNestedLoopLevel,
-                      "AvgNestedLoopLevel"),
-        REGISTER_NAME(ProteanFIExtendedFeaturesInstrPerLoop, "InstrPerLoop"),
-        REGISTER_NAME(
-            ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
-            "BlockWithMultipleSuccessorsPerLoop"),
-        REGISTER_NAME(CallerBlockFreq, "block_freq"),
-        REGISTER_NAME(CallSiteHeight, "callsite_height"),
-        REGISTER_NAME(ConstantParam, "nr_ctant_params"),
-        REGISTER_NAME(CostEstimate, "cost_estimate"),
-        REGISTER_NAME(LoopLevel, "loop_level"),
-        REGISTER_NAME(MandatoryKind, "mandatory_kind"),
-        REGISTER_NAME(MandatoryOnly, "mandatory_only"),
-        REGISTER_NAME(OptCode, "opt_code"),
-        REGISTER_NAME(IsIndirectCall, "is_indirect"),
-        REGISTER_NAME(IsInInnerLoop, "is_in_inner_loop"),
-        REGISTER_NAME(IsMustTailCall, "is_must_tail"),
-        REGISTER_NAME(IsTailCall, "is_tail"),
-        REGISTER_NAME(FunctionCount, "function_count"),
-        REGISTER_NAME(TotalBBCount, "total_bb_count"),
-        REGISTER_NAME(AverageBBPerFunction, "average_bb_per_function"),
-        REGISTER_NAME(TotalInstructionCount, "total_instruction_count"),
-        REGISTER_NAME(TotalFunctionCalls, "total_function_calls"),
-        REGISTER_NAME(AverageCallsPerFunction, "average_calls_per_function"),
-        REGISTER_NAME(MedianCallsPerFunction, "median_calls_per_function"),
-        REGISTER_NAME(LoopCount, "loop_count"),
-        REGISTER_NAME(TotalEdgeCount, "total_edge_count"),
-        REGISTER_NAME(CriticalEdgeCount, "critical_edge_count"),
-        REGISTER_NAME(GlobalVariableCount, "global_variable_count"),
-        REGISTER_NAME(AverageInstructionsPerFunction,
-                      "average_instructions_per_function"),
-        REGISTER_NAME(AverageLoadInstructionsPerFunction,
-                      "average_load_instructions_per_function"),
-        REGISTER_NAME(AverageStoreInstructionsPerFunction,
-                      "average_store_instructions_per_function"),
-        REGISTER_NAME(SCCSize, "scc_size"),
-        REGISTER_NAME(AverageComponentSize, "average_component_size"),
-        REGISTER_NAME(NumOfFeatures, "num_features"),
-        REGISTER_NAME(TripCount, "TripCount"),
-        REGISTER_NAME(MaxTripCount, "MaxTripCount"),
-        REGISTER_NAME(LoopSize, "Size"),
-        REGISTER_NAME(InitialIVValueInt, "InitialIVValueInt"),
-        REGISTER_NAME(FinalIVValueInt, "FinalIVValueInt"),
-        REGISTER_NAME(StepValueInt, "StepValueInt"),
-        REGISTER_NAME(NumPartitions, "NumPartitions"),
-        REGISTER_NAME(IndVarSetSize, "IndVarSetSize"),
-        REGISTER_NAME(AvgStoreSetSize, "AvgStoreSetSize"),
-        REGISTER_NAME(AvgNumInsts, "AvgNumInsts"),
-        REGISTER_NAME(NumLoadInstPerLoopNest, "NumLoadInstPerLoopNest"),
-        REGISTER_NAME(NumStoreInstPerLoopNest, "NumStoreInstPerLoopNest"),
-        REGISTER_NAME(TotLoopNestInstCount, "TotLoopNestInstCount"),
-        REGISTER_NAME(AvgNumLoadInstPerLoopNest, "AvgNumLoadInstPerLoopNest"),
-        REGISTER_NAME(NumLoadInstPerLoop, "NumLoadInstPerLoop"),
-        REGISTER_NAME(NumStoreInstPerLoop, "NumStoreInstPerLoop"),
-        REGISTER_NAME(TotLoopInstCount, "TotLoopInstCount"),
-        REGISTER_NAME(AvgNumLoadInstPerLoop, "AvgNumLoadInstPerLoop"),
-        REGISTER_NAME(TotBlocksPerLoop, "TotBlocksPerLoop"),
-        REGISTER_NAME(IsInnerMostLoop, "IsInnerMostLoop"),
-        REGISTER_NAME(IsOuterMostLoop, "IsOuterMostLoop"),
-        REGISTER_NAME(MaxLoopHeight, "MaxLoopHeight"),
-        REGISTER_NAME(IsFixedTripCount, "IsFixedTripCount"),
-    };
+  Result[ProteanCollectFeatures::FeatureIndex::INDEX_NAME] = NAME
+const llvm::EnumeratedArray<std::string, ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+    ProteanCollectFeatures::FeatureIndexToName = [] {
+      llvm::EnumeratedArray<std::string, ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+          Result;
+
+      REGISTER_NAME(SROASavings, "sroa_savings");
+      REGISTER_NAME(SROALosses, "sroa_losses");
+      REGISTER_NAME(LoadElimination, "load_elimination");
+      REGISTER_NAME(CallPenalty, "call_penalty");
+      REGISTER_NAME(CallArgumentSetup, "call_argument_setup");
+      REGISTER_NAME(LoadRelativeIntrinsic, "load_relative_intrinsic");
+      REGISTER_NAME(LoweredCallArgSetup, "lowered_call_arg_setup");
+      REGISTER_NAME(IndirectCallPenalty, "indirect_call_penalty");
+      REGISTER_NAME(JumpTablePenalty, "jump_table_penalty");
+      REGISTER_NAME(CaseClusterPenalty, "case_cluster_penalty");
+      REGISTER_NAME(SwitchPenalty, "switch_penalty");
+      REGISTER_NAME(SwitchDefaultDestPenalty, "switch_default_dest_penalty");
+      REGISTER_NAME(UnsimplifiedCommonInstructions,
+                    "unsimplified_common_instructions");
+      REGISTER_NAME(NumLoops, "num_loops");
+      REGISTER_NAME(DeadBlocks, "dead_blocks");
+      REGISTER_NAME(SimplifiedInstructions, "simplified_instructions");
+      REGISTER_NAME(ConstantArgs, "constant_args");
+      REGISTER_NAME(ConstantOffsetPtrArgs, "constant_offset_ptr_args");
+      REGISTER_NAME(CallSiteCost, "callsite_cost");
+      REGISTER_NAME(ColdCcPenalty, "cold_cc_penalty");
+      REGISTER_NAME(LastCallToStaticBonus, "last_call_to_static_bonus");
+      REGISTER_NAME(IsMultipleBlocks, "is_multiple_blocks");
+      REGISTER_NAME(NestedInlines, "nested_inlines");
+      REGISTER_NAME(NestedInlineCostEstimate, "nested_inline_cost_estimate");
+      REGISTER_NAME(Threshold, "threshold");
+      REGISTER_NAME(BasicBlockCount, "basic_block_count");
+      REGISTER_NAME(BlocksReachedFromConditionalInstruction,
+                    "conditionally_executed_blocks");
+      REGISTER_NAME(Uses, "users");
+      REGISTER_NAME(EdgeCount, "edge_count");
+      REGISTER_NAME(NodeCount, "node_count");
+      REGISTER_NAME(ColdCallSite, "cold_callsite");
+      REGISTER_NAME(HotCallSite, "hot_callsite");
+      REGISTER_NAME(ProteanFIExtendedFeaturesInitialSize, "InitialSize");
+      REGISTER_NAME(ProteanFIExtendedFeaturesBlocks, "Blocks");
+      REGISTER_NAME(ProteanFIExtendedFeaturesCalls, "Calls");
+      REGISTER_NAME(ProteanFIExtendedFeaturesIsLocal, "IsLocal");
+      REGISTER_NAME(ProteanFIExtendedFeaturesIsLinkOnceODR, "IsLinkOnceODR");
+      REGISTER_NAME(ProteanFIExtendedFeaturesIsLinkOnce, "IsLinkOnce");
+      REGISTER_NAME(ProteanFIExtendedFeaturesLoops, "Loops");
+      REGISTER_NAME(ProteanFIExtendedFeaturesMaxLoopDepth, "MaxLoopDepth");
+      REGISTER_NAME(ProteanFIExtendedFeaturesMaxDomTreeLevel,
+                    "MaxDomTreeLevel");
+      REGISTER_NAME(ProteanFIExtendedFeaturesPtrArgs, "PtrArgs");
+      REGISTER_NAME(ProteanFIExtendedFeaturesPtrCallee, "PtrCallee");
+      REGISTER_NAME(ProteanFIExtendedFeaturesCallReturnPtr, "CallReturnPtr");
+      REGISTER_NAME(ProteanFIExtendedFeaturesConditionalBranch,
+                    "ConditionalBranch");
+      REGISTER_NAME(ProteanFIExtendedFeaturesCBwithArg, "CBwithArg");
+      REGISTER_NAME(ProteanFIExtendedFeaturesCallerHeight, "CallerHeight");
+      REGISTER_NAME(ProteanFIExtendedFeaturesCallUsage, "CallUsage");
+      REGISTER_NAME(ProteanFIExtendedFeaturesIsRecursive, "IsRecursive");
+      REGISTER_NAME(ProteanFIExtendedFeaturesNumCallsiteInLoop,
+                    "NumCallsiteInLoop");
+      REGISTER_NAME(ProteanFIExtendedFeaturesNumOfCallUsesInLoop,
+                    "NumOfCallUsesInLoop");
+      REGISTER_NAME(ProteanFIExtendedFeaturesEntryBlockFreq, "EntryBlockFreq");
+      REGISTER_NAME(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq,
+                    "MaxCallsiteBlockFreq");
+      REGISTER_NAME(ProteanFIExtendedFeaturesInstructionPerBlock,
+                    "InstructionPerBlock");
+      REGISTER_NAME(ProteanFIExtendedFeaturesSuccessorPerBlock,
+                    "SuccessorPerBlock");
+      REGISTER_NAME(ProteanFIExtendedFeaturesAvgVecInstr, "AvgVecInstr");
+      REGISTER_NAME(ProteanFIExtendedFeaturesAvgNestedLoopLevel,
+                    "AvgNestedLoopLevel");
+      REGISTER_NAME(ProteanFIExtendedFeaturesInstrPerLoop, "InstrPerLoop");
+      REGISTER_NAME(ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
+                    "BlockWithMultipleSuccessorsPerLoop");
+      REGISTER_NAME(CallerBlockFreq, "block_freq");
+      REGISTER_NAME(CallSiteHeight, "callsite_height");
+      REGISTER_NAME(ConstantParam, "nr_ctant_params");
+      REGISTER_NAME(CostEstimate, "cost_estimate");
+      REGISTER_NAME(LoopLevel, "loop_level");
+      REGISTER_NAME(MandatoryKind, "mandatory_kind");
+      REGISTER_NAME(MandatoryOnly, "mandatory_only");
+      REGISTER_NAME(OptCode, "opt_code");
+      REGISTER_NAME(IsIndirectCall, "is_indirect");
+      REGISTER_NAME(IsInInnerLoop, "is_in_inner_loop");
+      REGISTER_NAME(IsMustTailCall, "is_must_tail");
+      REGISTER_NAME(IsTailCall, "is_tail");
+      REGISTER_NAME(FunctionCount, "function_count");
+      REGISTER_NAME(TotalBBCount, "total_bb_count");
+      REGISTER_NAME(AverageBBPerFunction, "average_bb_per_function");
+      REGISTER_NAME(TotalInstructionCount, "total_instruction_count");
+      REGISTER_NAME(TotalFunctionCalls, "total_function_calls");
+      REGISTER_NAME(AverageCallsPerFunction, "average_calls_per_function");
+      REGISTER_NAME(MedianCallsPerFunction, "median_calls_per_function");
+      REGISTER_NAME(LoopCount, "loop_count");
+      REGISTER_NAME(TotalEdgeCount, "total_edge_count");
+      REGISTER_NAME(CriticalEdgeCount, "critical_edge_count");
+      REGISTER_NAME(GlobalVariableCount, "global_variable_count");
+      REGISTER_NAME(AverageInstructionsPerFunction,
+                    "average_instructions_per_function");
+      REGISTER_NAME(AverageLoadInstructionsPerFunction,
+                    "average_load_instructions_per_function");
+      REGISTER_NAME(AverageStoreInstructionsPerFunction,
+                    "average_store_instructions_per_function");
+      REGISTER_NAME(SCCSize, "scc_size");
+      REGISTER_NAME(AverageComponentSize, "average_component_size");
+      REGISTER_NAME(NumOfFeatures, "num_features");
+      REGISTER_NAME(TripCount, "TripCount");
+      REGISTER_NAME(MaxTripCount, "MaxTripCount");
+      REGISTER_NAME(LoopSize, "Size");
+      REGISTER_NAME(InitialIVValueInt, "InitialIVValueInt");
+      REGISTER_NAME(FinalIVValueInt, "FinalIVValueInt");
+      REGISTER_NAME(StepValueInt, "StepValueInt");
+      REGISTER_NAME(NumPartitions, "NumPartitions");
+      REGISTER_NAME(IndVarSetSize, "IndVarSetSize");
+      REGISTER_NAME(AvgStoreSetSize, "AvgStoreSetSize");
+      REGISTER_NAME(AvgNumInsts, "AvgNumInsts");
+      REGISTER_NAME(NumLoadInstPerLoopNest, "NumLoadInstPerLoopNest");
+      REGISTER_NAME(NumStoreInstPerLoopNest, "NumStoreInstPerLoopNest");
+      REGISTER_NAME(TotLoopNestInstCount, "TotLoopNestInstCount");
+      REGISTER_NAME(AvgNumLoadInstPerLoopNest, "AvgNumLoadInstPerLoopNest");
+      REGISTER_NAME(NumLoadInstPerLoop, "NumLoadInstPerLoop");
+      REGISTER_NAME(NumStoreInstPerLoop, "NumStoreInstPerLoop");
+      REGISTER_NAME(TotLoopInstCount, "TotLoopInstCount");
+      REGISTER_NAME(AvgNumLoadInstPerLoop, "AvgNumLoadInstPerLoop");
+      REGISTER_NAME(TotBlocksPerLoop, "TotBlocksPerLoop");
+      REGISTER_NAME(IsInnerMostLoop, "IsInnerMostLoop");
+      REGISTER_NAME(IsOuterMostLoop, "IsOuterMostLoop");
+      REGISTER_NAME(MaxLoopHeight, "MaxLoopHeight");
+      REGISTER_NAME(IsFixedTripCount, "IsFixedTripCount");
+
+      return Result;
+    }();
 #undef REGISTER_NAME
 
 #define REGISTER_SCOPE(INDEX_NAME, NAME)                                       \
-  {                                                                            \
-    ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                          \
-        ProteanCollectFeatures::Scope::NAME                                    \
-  }
-const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
-                         ProteanCollectFeatures::Scope>
-    ProteanCollectFeatures::FeatureIndexToScope{
-        REGISTER_SCOPE(SROASavings, CallSite),
-        REGISTER_SCOPE(SROALosses, CallSite),
-        REGISTER_SCOPE(LoadElimination, CallSite),
-        REGISTER_SCOPE(CallPenalty, CallSite),
-        REGISTER_SCOPE(CallArgumentSetup, CallSite),
-        REGISTER_SCOPE(LoadRelativeIntrinsic, CallSite),
-        REGISTER_SCOPE(LoweredCallArgSetup, CallSite),
-        REGISTER_SCOPE(IndirectCallPenalty, CallSite),
-        REGISTER_SCOPE(JumpTablePenalty, CallSite),
-        REGISTER_SCOPE(CaseClusterPenalty, CallSite),
-        REGISTER_SCOPE(SwitchPenalty, CallSite),
-        REGISTER_SCOPE(SwitchDefaultDestPenalty, CallSite),
-        REGISTER_SCOPE(UnsimplifiedCommonInstructions, CallSite),
-        REGISTER_SCOPE(NumLoops, CallSite),
-        REGISTER_SCOPE(DeadBlocks, CallSite),
-        REGISTER_SCOPE(SimplifiedInstructions, CallSite),
-        REGISTER_SCOPE(ConstantArgs, CallSite),
-        REGISTER_SCOPE(ConstantOffsetPtrArgs, CallSite),
-        REGISTER_SCOPE(CallSiteCost, CallSite),
-        REGISTER_SCOPE(ColdCcPenalty, CallSite),
-        REGISTER_SCOPE(LastCallToStaticBonus, CallSite),
-        REGISTER_SCOPE(IsMultipleBlocks, CallSite),
-        REGISTER_SCOPE(NestedInlines, CallSite),
-        REGISTER_SCOPE(NestedInlineCostEstimate, CallSite),
-        REGISTER_SCOPE(Threshold, CallSiteThreshold),
-        REGISTER_SCOPE(BasicBlockCount, Function),
-        REGISTER_SCOPE(BlocksReachedFromConditionalInstruction, Function),
-        REGISTER_SCOPE(Uses, Function),
-        REGISTER_SCOPE(EdgeCount, Module),
-        REGISTER_SCOPE(NodeCount, Module),
-        REGISTER_SCOPE(ColdCallSite, CallSite),
-        REGISTER_SCOPE(HotCallSite, CallSite),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesInitialSize, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesBlocks, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesCalls, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesIsLocal, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesIsLinkOnceODR, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesIsLinkOnce, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesLoops, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesMaxLoopDepth, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesMaxDomTreeLevel, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesPtrArgs, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesPtrCallee, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesCallReturnPtr, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesConditionalBranch, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesCBwithArg, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesCallerHeight, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesCallUsage, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesIsRecursive, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesNumCallsiteInLoop, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesNumOfCallUsesInLoop, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesEntryBlockFreq, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesInstructionPerBlock, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesSuccessorPerBlock, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesAvgVecInstr, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesAvgNestedLoopLevel, Function),
-        REGISTER_SCOPE(ProteanFIExtendedFeaturesInstrPerLoop, Function),
-        REGISTER_SCOPE(
-            ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
-            Function),
-        REGISTER_SCOPE(CallerBlockFreq, CallSite),
-        REGISTER_SCOPE(CallSiteHeight, CallSite),
-        REGISTER_SCOPE(ConstantParam, CallSite),
-        REGISTER_SCOPE(CostEstimate, CallSite),
-        REGISTER_SCOPE(LoopLevel, CallSite),
-        REGISTER_SCOPE(MandatoryKind, CallSite),
-        REGISTER_SCOPE(MandatoryOnly, CallSite),
-        REGISTER_SCOPE(OptCode, CallSite),
-        REGISTER_SCOPE(IsIndirectCall, CallSite),
-        REGISTER_SCOPE(IsInInnerLoop, CallSite),
-        REGISTER_SCOPE(IsMustTailCall, CallSite),
-        REGISTER_SCOPE(IsTailCall, CallSite),
-        REGISTER_SCOPE(TripCount, Loop),
-        REGISTER_SCOPE(MaxTripCount, Loop),
-        REGISTER_SCOPE(IsFixedTripCount, Loop),
-        REGISTER_SCOPE(LoopSize, Loop),
-        REGISTER_SCOPE(InitialIVValueInt, Loop),
-        REGISTER_SCOPE(FinalIVValueInt, Loop),
-        REGISTER_SCOPE(StepValueInt, Loop),
-        REGISTER_SCOPE(NumPartitions, Loop),
-        REGISTER_SCOPE(IndVarSetSize, Loop),
-        REGISTER_SCOPE(AvgStoreSetSize, Loop),
-        REGISTER_SCOPE(AvgNumInsts, Loop),
-        REGISTER_SCOPE(NumLoadInstPerLoopNest, Loop),
-        REGISTER_SCOPE(NumStoreInstPerLoopNest, Loop),
-        REGISTER_SCOPE(TotLoopNestInstCount, Loop),
-        REGISTER_SCOPE(AvgNumLoadInstPerLoopNest, Loop),
-        REGISTER_SCOPE(NumLoadInstPerLoop, Loop),
-        REGISTER_SCOPE(NumStoreInstPerLoop, Loop),
-        REGISTER_SCOPE(TotLoopInstCount, Loop),
-        REGISTER_SCOPE(AvgNumLoadInstPerLoop, Loop),
-        REGISTER_SCOPE(TotBlocksPerLoop, Loop),
-        REGISTER_SCOPE(IsInnerMostLoop, Loop),
-        REGISTER_SCOPE(IsOuterMostLoop, Loop),
-        REGISTER_SCOPE(MaxLoopHeight, Loop),
-        REGISTER_SCOPE(FunctionCount, Module),
-        REGISTER_SCOPE(AverageBBPerFunction, Module),
-        REGISTER_SCOPE(TotalBBCount, Module),
-        REGISTER_SCOPE(TotalInstructionCount, Module),
-        REGISTER_SCOPE(TotalFunctionCalls, Module),
-        REGISTER_SCOPE(AverageCallsPerFunction, Module),
-        REGISTER_SCOPE(MedianCallsPerFunction, Module),
-        REGISTER_SCOPE(TotalEdgeCount, Module),
-        REGISTER_SCOPE(CriticalEdgeCount, Module),
-        REGISTER_SCOPE(GlobalVariableCount, Module),
-        REGISTER_SCOPE(AverageInstructionsPerFunction, Module),
-        REGISTER_SCOPE(AverageLoadInstructionsPerFunction, Module),
-        REGISTER_SCOPE(AverageStoreInstructionsPerFunction, Module),
-        REGISTER_SCOPE(SCCSize, Function),
-        REGISTER_SCOPE(AverageComponentSize, Function),
-        REGISTER_SCOPE(LoopCount, Module),
-    };
+  Result[ProteanCollectFeatures::FeatureIndex::INDEX_NAME] =                   \
+      ProteanCollectFeatures::Scope::NAME
+
+const llvm::EnumeratedArray<ProteanCollectFeatures::Scope,
+                            ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+    ProteanCollectFeatures::FeatureIndexToScope = [] {
+      llvm::EnumeratedArray<ProteanCollectFeatures::Scope,
+                            ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+          Result(Scope::NumOfScope);
+      REGISTER_SCOPE(SROASavings, CallSite);
+      REGISTER_SCOPE(SROALosses, CallSite);
+      REGISTER_SCOPE(LoadElimination, CallSite);
+      REGISTER_SCOPE(CallPenalty, CallSite);
+      REGISTER_SCOPE(CallArgumentSetup, CallSite);
+      REGISTER_SCOPE(LoadRelativeIntrinsic, CallSite);
+      REGISTER_SCOPE(LoweredCallArgSetup, CallSite);
+      REGISTER_SCOPE(IndirectCallPenalty, CallSite);
+      REGISTER_SCOPE(JumpTablePenalty, CallSite);
+      REGISTER_SCOPE(CaseClusterPenalty, CallSite);
+      REGISTER_SCOPE(SwitchPenalty, CallSite);
+      REGISTER_SCOPE(SwitchDefaultDestPenalty, CallSite);
+      REGISTER_SCOPE(UnsimplifiedCommonInstructions, CallSite);
+      REGISTER_SCOPE(NumLoops, CallSite);
+      REGISTER_SCOPE(DeadBlocks, CallSite);
+      REGISTER_SCOPE(SimplifiedInstructions, CallSite);
+      REGISTER_SCOPE(ConstantArgs, CallSite);
+      REGISTER_SCOPE(ConstantOffsetPtrArgs, CallSite);
+      REGISTER_SCOPE(CallSiteCost, CallSite);
+      REGISTER_SCOPE(ColdCcPenalty, CallSite);
+      REGISTER_SCOPE(LastCallToStaticBonus, CallSite);
+      REGISTER_SCOPE(IsMultipleBlocks, CallSite);
+      REGISTER_SCOPE(NestedInlines, CallSite);
+      REGISTER_SCOPE(NestedInlineCostEstimate, CallSite);
+      REGISTER_SCOPE(Threshold, CallSiteThreshold);
+      REGISTER_SCOPE(BasicBlockCount, Function);
+      REGISTER_SCOPE(BlocksReachedFromConditionalInstruction, Function);
+      REGISTER_SCOPE(Uses, Function);
+      REGISTER_SCOPE(EdgeCount, Module);
+      REGISTER_SCOPE(NodeCount, Module);
+      REGISTER_SCOPE(ColdCallSite, CallSite);
+      REGISTER_SCOPE(HotCallSite, CallSite);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesInitialSize, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesBlocks, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesCalls, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesIsLocal, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesIsLinkOnceODR, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesIsLinkOnce, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesLoops, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesMaxLoopDepth, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesMaxDomTreeLevel, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesPtrArgs, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesPtrCallee, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesCallReturnPtr, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesConditionalBranch, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesCBwithArg, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesCallerHeight, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesCallUsage, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesIsRecursive, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesNumCallsiteInLoop, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesNumOfCallUsesInLoop, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesEntryBlockFreq, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesInstructionPerBlock, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesSuccessorPerBlock, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesAvgVecInstr, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesAvgNestedLoopLevel, Function);
+      REGISTER_SCOPE(ProteanFIExtendedFeaturesInstrPerLoop, Function);
+      REGISTER_SCOPE(
+          ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
+          Function);
+      REGISTER_SCOPE(CallerBlockFreq, CallSite);
+      REGISTER_SCOPE(CallSiteHeight, CallSite);
+      REGISTER_SCOPE(ConstantParam, CallSite);
+      REGISTER_SCOPE(CostEstimate, CallSite);
+      REGISTER_SCOPE(LoopLevel, CallSite);
+      REGISTER_SCOPE(MandatoryKind, CallSite);
+      REGISTER_SCOPE(MandatoryOnly, CallSite);
+      REGISTER_SCOPE(OptCode, CallSite);
+      REGISTER_SCOPE(IsIndirectCall, CallSite);
+      REGISTER_SCOPE(IsInInnerLoop, CallSite);
+      REGISTER_SCOPE(IsMustTailCall, CallSite);
+      REGISTER_SCOPE(IsTailCall, CallSite);
+      REGISTER_SCOPE(TripCount, Loop);
+      REGISTER_SCOPE(MaxTripCount, Loop);
+      REGISTER_SCOPE(IsFixedTripCount, Loop);
+      REGISTER_SCOPE(LoopSize, Loop);
+      REGISTER_SCOPE(InitialIVValueInt, Loop);
+      REGISTER_SCOPE(FinalIVValueInt, Loop);
+      REGISTER_SCOPE(StepValueInt, Loop);
+      REGISTER_SCOPE(NumPartitions, Loop);
+      REGISTER_SCOPE(IndVarSetSize, Loop);
+      REGISTER_SCOPE(AvgStoreSetSize, Loop);
+      REGISTER_SCOPE(AvgNumInsts, Loop);
+      REGISTER_SCOPE(NumLoadInstPerLoopNest, Loop);
+      REGISTER_SCOPE(NumStoreInstPerLoopNest, Loop);
+      REGISTER_SCOPE(TotLoopNestInstCount, Loop);
+      REGISTER_SCOPE(AvgNumLoadInstPerLoopNest, Loop);
+      REGISTER_SCOPE(NumLoadInstPerLoop, Loop);
+      REGISTER_SCOPE(NumStoreInstPerLoop, Loop);
+      REGISTER_SCOPE(TotLoopInstCount, Loop);
+      REGISTER_SCOPE(AvgNumLoadInstPerLoop, Loop);
+      REGISTER_SCOPE(TotBlocksPerLoop, Loop);
+      REGISTER_SCOPE(IsInnerMostLoop, Loop);
+      REGISTER_SCOPE(IsOuterMostLoop, Loop);
+      REGISTER_SCOPE(MaxLoopHeight, Loop);
+      REGISTER_SCOPE(FunctionCount, Module);
+      REGISTER_SCOPE(AverageBBPerFunction, Module);
+      REGISTER_SCOPE(TotalBBCount, Module);
+      REGISTER_SCOPE(TotalInstructionCount, Module);
+      REGISTER_SCOPE(TotalFunctionCalls, Module);
+      REGISTER_SCOPE(AverageCallsPerFunction, Module);
+      REGISTER_SCOPE(MedianCallsPerFunction, Module);
+      REGISTER_SCOPE(TotalEdgeCount, Module);
+      REGISTER_SCOPE(CriticalEdgeCount, Module);
+      REGISTER_SCOPE(GlobalVariableCount, Module);
+      REGISTER_SCOPE(AverageInstructionsPerFunction, Module);
+      REGISTER_SCOPE(AverageLoadInstructionsPerFunction, Module);
+      REGISTER_SCOPE(AverageStoreInstructionsPerFunction, Module);
+      REGISTER_SCOPE(SCCSize, Function);
+      REGISTER_SCOPE(AverageComponentSize, Function);
+      REGISTER_SCOPE(LoopCount, Module);
+
+      return Result;
+    }();
 #undef REGISTER_SCOPE
 
 #define REGISTER_GROUP(INDEX_NAME, NAME)                                       \
-  {                                                                            \
-    ProteanCollectFeatures::FeatureIndex::INDEX_NAME,                          \
-        ProteanCollectFeatures::GroupID::NAME                                  \
-  }
-const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
-                         ProteanCollectFeatures::GroupID>
-    ProteanCollectFeatures::FeatureIndexToGroup{
-        REGISTER_GROUP(SROASavings, InlineCostFeatureGroup),
-        REGISTER_GROUP(SROALosses, InlineCostFeatureGroup),
-        REGISTER_GROUP(LoadElimination, InlineCostFeatureGroup),
-        REGISTER_GROUP(CallPenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(CallArgumentSetup, InlineCostFeatureGroup),
-        REGISTER_GROUP(LoadRelativeIntrinsic, InlineCostFeatureGroup),
-        REGISTER_GROUP(LoweredCallArgSetup, InlineCostFeatureGroup),
-        REGISTER_GROUP(IndirectCallPenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(JumpTablePenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(CaseClusterPenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(SwitchPenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(SwitchDefaultDestPenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(UnsimplifiedCommonInstructions, InlineCostFeatureGroup),
-        REGISTER_GROUP(NumLoops, InlineCostFeatureGroup),
-        REGISTER_GROUP(DeadBlocks, InlineCostFeatureGroup),
-        REGISTER_GROUP(SimplifiedInstructions, InlineCostFeatureGroup),
-        REGISTER_GROUP(ConstantArgs, InlineCostFeatureGroup),
-        REGISTER_GROUP(ConstantOffsetPtrArgs, InlineCostFeatureGroup),
-        REGISTER_GROUP(CallSiteCost, InlineCostFeatureGroup),
-        REGISTER_GROUP(ColdCcPenalty, InlineCostFeatureGroup),
-        REGISTER_GROUP(LastCallToStaticBonus, InlineCostFeatureGroup),
-        REGISTER_GROUP(IsMultipleBlocks, InlineCostFeatureGroup),
-        REGISTER_GROUP(NestedInlines, InlineCostFeatureGroup),
-        REGISTER_GROUP(NestedInlineCostEstimate, InlineCostFeatureGroup),
-        REGISTER_GROUP(Threshold, ThresholdFeatureGroup),
-        REGISTER_GROUP(BasicBlockCount, FPIRelated),
-        REGISTER_GROUP(BlocksReachedFromConditionalInstruction, FPIRelated),
-        REGISTER_GROUP(Uses, FPIRelated),
-        REGISTER_GROUP(EdgeCount, EdgeNodeCount),
-        REGISTER_GROUP(NodeCount, EdgeNodeCount),
-        REGISTER_GROUP(ColdCallSite, HotColdCallSite),
-        REGISTER_GROUP(HotCallSite, HotColdCallSite),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesInitialSize,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesBlocks,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesCalls,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesIsLocal,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesIsLinkOnceODR,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesIsLinkOnce,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesLoops,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesMaxLoopDepth,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesMaxDomTreeLevel,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesPtrArgs,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesPtrCallee,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesCallReturnPtr,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesConditionalBranch,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesCBwithArg,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesCallerHeight,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesCallUsage,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesIsRecursive,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesNumCallsiteInLoop,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesNumOfCallUsesInLoop,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesEntryBlockFreq,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesInstructionPerBlock,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesSuccessorPerBlock,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesAvgVecInstr,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesAvgNestedLoopLevel,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(ProteanFIExtendedFeaturesInstrPerLoop,
-                       ProteanFIExtendedFeatures),
-        REGISTER_GROUP(
-            ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
-            ProteanFIExtendedFeatures),
-        REGISTER_GROUP(TripCount, TripCountFeatures),
-        REGISTER_GROUP(MaxTripCount, TripCountFeatures),
-        REGISTER_GROUP(IsFixedTripCount, TripCountFeatures),
-        REGISTER_GROUP(InitialIVValueInt, IVRelatedFeatures),
-        REGISTER_GROUP(FinalIVValueInt, IVRelatedFeatures),
-        REGISTER_GROUP(StepValueInt, IVRelatedFeatures),
-        REGISTER_GROUP(NumPartitions, LoopSetSizeFeatures),
-        REGISTER_GROUP(IndVarSetSize, LoopSetSizeFeatures),
-        REGISTER_GROUP(AvgStoreSetSize, LoopSetSizeFeatures),
-        REGISTER_GROUP(AvgNumInsts, LoopSetSizeFeatures),
-        REGISTER_GROUP(NumLoadInstPerLoopNest, LoopInstFeatures),
-        REGISTER_GROUP(NumStoreInstPerLoopNest, LoopInstFeatures),
-        REGISTER_GROUP(TotLoopNestInstCount, LoopInstFeatures),
-        REGISTER_GROUP(AvgNumLoadInstPerLoopNest, LoopInstFeatures),
-        REGISTER_GROUP(NumLoadInstPerLoop, LoopInstFeatures),
-        REGISTER_GROUP(NumStoreInstPerLoop, LoopInstFeatures),
-        REGISTER_GROUP(TotLoopInstCount, LoopInstFeatures),
-        REGISTER_GROUP(AvgNumLoadInstPerLoop, LoopInstFeatures),
-        REGISTER_GROUP(TotBlocksPerLoop, LoopInstFeatures),
-        REGISTER_GROUP(IsInnerMostLoop, InnerOuterFeatures),
-        REGISTER_GROUP(IsOuterMostLoop, InnerOuterFeatures),
-        REGISTER_GROUP(FunctionCount, ModuleInfoCount),
-        REGISTER_GROUP(TotalBBCount, ModuleInfoCount),
-        REGISTER_GROUP(AverageBBPerFunction, ModuleInfoCount),
-        REGISTER_GROUP(TotalInstructionCount, ModuleInfoCount),
-        REGISTER_GROUP(TotalFunctionCalls, ModuleInfoCount),
-        REGISTER_GROUP(AverageCallsPerFunction, ModuleInfoCount),
-        REGISTER_GROUP(MedianCallsPerFunction, ModuleInfoCount),
-        REGISTER_GROUP(LoopCount, ModuleInfoCount),
-        REGISTER_GROUP(TotalEdgeCount, ModuleInfoCount),
-        REGISTER_GROUP(CriticalEdgeCount, ModuleInfoCount),
-        REGISTER_GROUP(GlobalVariableCount, ModuleInfoCount),
-        REGISTER_GROUP(AverageInstructionsPerFunction, ModuleInfoCount),
-        REGISTER_GROUP(AverageLoadInstructionsPerFunction, ModuleInfoCount),
-        REGISTER_GROUP(AverageStoreInstructionsPerFunction, ModuleInfoCount),
-        REGISTER_GROUP(SCCSize, FunctionInfo),
-        REGISTER_GROUP(AverageComponentSize, FunctionInfo),
-    };
+  Result[ProteanCollectFeatures::FeatureIndex::INDEX_NAME] =                   \
+      ProteanCollectFeatures::GroupID::NAME
+const llvm::EnumeratedArray<ProteanCollectFeatures::GroupID,
+                            ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+    ProteanCollectFeatures::FeatureIndexToGroup = [] {
+      llvm::EnumeratedArray<ProteanCollectFeatures::GroupID,
+                            ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+          Result(GroupID::NumOfGroupID);
+      REGISTER_GROUP(SROASavings, InlineCostFeatureGroup);
+      REGISTER_GROUP(SROALosses, InlineCostFeatureGroup);
+      REGISTER_GROUP(LoadElimination, InlineCostFeatureGroup);
+      REGISTER_GROUP(CallPenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(CallArgumentSetup, InlineCostFeatureGroup);
+      REGISTER_GROUP(LoadRelativeIntrinsic, InlineCostFeatureGroup);
+      REGISTER_GROUP(LoweredCallArgSetup, InlineCostFeatureGroup);
+      REGISTER_GROUP(IndirectCallPenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(JumpTablePenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(CaseClusterPenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(SwitchPenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(SwitchDefaultDestPenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(UnsimplifiedCommonInstructions, InlineCostFeatureGroup);
+      REGISTER_GROUP(NumLoops, InlineCostFeatureGroup);
+      REGISTER_GROUP(DeadBlocks, InlineCostFeatureGroup);
+      REGISTER_GROUP(SimplifiedInstructions, InlineCostFeatureGroup);
+      REGISTER_GROUP(ConstantArgs, InlineCostFeatureGroup);
+      REGISTER_GROUP(ConstantOffsetPtrArgs, InlineCostFeatureGroup);
+      REGISTER_GROUP(CallSiteCost, InlineCostFeatureGroup);
+      REGISTER_GROUP(ColdCcPenalty, InlineCostFeatureGroup);
+      REGISTER_GROUP(LastCallToStaticBonus, InlineCostFeatureGroup);
+      REGISTER_GROUP(IsMultipleBlocks, InlineCostFeatureGroup);
+      REGISTER_GROUP(NestedInlines, InlineCostFeatureGroup);
+      REGISTER_GROUP(NestedInlineCostEstimate, InlineCostFeatureGroup);
+      REGISTER_GROUP(Threshold, ThresholdFeatureGroup);
+      REGISTER_GROUP(BasicBlockCount, FPIRelated);
+      REGISTER_GROUP(BlocksReachedFromConditionalInstruction, FPIRelated);
+      REGISTER_GROUP(Uses, FPIRelated);
+      REGISTER_GROUP(EdgeCount, EdgeNodeCount);
+      REGISTER_GROUP(NodeCount, EdgeNodeCount);
+      REGISTER_GROUP(ColdCallSite, HotColdCallSite);
+      REGISTER_GROUP(HotCallSite, HotColdCallSite);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesInitialSize,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesBlocks,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesCalls, ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesIsLocal,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesIsLinkOnceODR,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesIsLinkOnce,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesLoops, ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesMaxLoopDepth,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesMaxDomTreeLevel,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesPtrArgs,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesPtrCallee,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesCallReturnPtr,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesConditionalBranch,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesCBwithArg,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesCallerHeight,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesCallUsage,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesIsRecursive,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesNumCallsiteInLoop,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesNumOfCallUsesInLoop,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesEntryBlockFreq,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesInstructionPerBlock,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesSuccessorPerBlock,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesAvgVecInstr,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesAvgNestedLoopLevel,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(ProteanFIExtendedFeaturesInstrPerLoop,
+                     ProteanFIExtendedFeatures);
+      REGISTER_GROUP(
+          ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
+          ProteanFIExtendedFeatures);
+      REGISTER_GROUP(TripCount, TripCountFeatures);
+      REGISTER_GROUP(MaxTripCount, TripCountFeatures);
+      REGISTER_GROUP(IsFixedTripCount, TripCountFeatures);
+      REGISTER_GROUP(InitialIVValueInt, IVRelatedFeatures);
+      REGISTER_GROUP(FinalIVValueInt, IVRelatedFeatures);
+      REGISTER_GROUP(StepValueInt, IVRelatedFeatures);
+      REGISTER_GROUP(NumPartitions, LoopSetSizeFeatures);
+      REGISTER_GROUP(IndVarSetSize, LoopSetSizeFeatures);
+      REGISTER_GROUP(AvgStoreSetSize, LoopSetSizeFeatures);
+      REGISTER_GROUP(AvgNumInsts, LoopSetSizeFeatures);
+      REGISTER_GROUP(NumLoadInstPerLoopNest, LoopInstFeatures);
+      REGISTER_GROUP(NumStoreInstPerLoopNest, LoopInstFeatures);
+      REGISTER_GROUP(TotLoopNestInstCount, LoopInstFeatures);
+      REGISTER_GROUP(AvgNumLoadInstPerLoopNest, LoopInstFeatures);
+      REGISTER_GROUP(NumLoadInstPerLoop, LoopInstFeatures);
+      REGISTER_GROUP(NumStoreInstPerLoop, LoopInstFeatures);
+      REGISTER_GROUP(TotLoopInstCount, LoopInstFeatures);
+      REGISTER_GROUP(AvgNumLoadInstPerLoop, LoopInstFeatures);
+      REGISTER_GROUP(TotBlocksPerLoop, LoopInstFeatures);
+      REGISTER_GROUP(IsInnerMostLoop, InnerOuterFeatures);
+      REGISTER_GROUP(IsOuterMostLoop, InnerOuterFeatures);
+      REGISTER_GROUP(FunctionCount, ModuleInfoCount);
+      REGISTER_GROUP(TotalBBCount, ModuleInfoCount);
+      REGISTER_GROUP(AverageBBPerFunction, ModuleInfoCount);
+      REGISTER_GROUP(TotalInstructionCount, ModuleInfoCount);
+      REGISTER_GROUP(TotalFunctionCalls, ModuleInfoCount);
+      REGISTER_GROUP(AverageCallsPerFunction, ModuleInfoCount);
+      REGISTER_GROUP(MedianCallsPerFunction, ModuleInfoCount);
+      REGISTER_GROUP(LoopCount, ModuleInfoCount);
+      REGISTER_GROUP(TotalEdgeCount, ModuleInfoCount);
+      REGISTER_GROUP(CriticalEdgeCount, ModuleInfoCount);
+      REGISTER_GROUP(GlobalVariableCount, ModuleInfoCount);
+      REGISTER_GROUP(AverageInstructionsPerFunction, ModuleInfoCount);
+      REGISTER_GROUP(AverageLoadInstructionsPerFunction, ModuleInfoCount);
+      REGISTER_GROUP(AverageStoreInstructionsPerFunction, ModuleInfoCount);
+      REGISTER_GROUP(SCCSize, FunctionInfo);
+      REGISTER_GROUP(AverageComponentSize, FunctionInfo);
+      return Result;
+    }();
 #undef REGISTER_GROUP
 
-// Given a map that may not be one to one. Returns the inverse mapping.
-// EX: Input:  A -> 1, B -> 1
+// Returns the inverse mapping, excluding unregistered array entries.
+// EX: Input: A -> 1, B -> 1
 //     Output: 1 -> A, 1 -> B
-template <class K, class V>
-static std::multimap<K, V> inverseMap(std::unordered_map<V, K> Map) {
+template <class K, class V, V Last>
+static std::multimap<K, V> inverseMap(const EnumeratedArray<K, V, Last> &Array,
+                                      K Invalid) {
   std::multimap<K, V> InverseMap;
-  for (const auto &It : Map) {
-    InverseMap.insert(std::pair<K, V>(It.second, It.first));
+  for (int I = 0; I < Array.size(); ++I) {
+    auto Index = static_cast<V>(I);
+    if (Array[Index] != Invalid)
+      InverseMap.emplace(Array[Index], Index);
   }
   return InverseMap;
 }
@@ -1031,166 +1048,168 @@ static std::multimap<K, V> inverseMap(std::unordered_map<V, K> Map) {
 const std::multimap<ProteanCollectFeatures::GroupID,
                     ProteanCollectFeatures::FeatureIndex>
     ProteanCollectFeatures::GroupToFeatureIndices{
-        inverseMap<ProteanCollectFeatures::GroupID,
-                   ProteanCollectFeatures::FeatureIndex>(FeatureIndexToGroup)};
+        inverseMap(FeatureIndexToGroup, GroupID::NumOfGroupID)};
 
 const std::multimap<ProteanCollectFeatures::Scope,
                     ProteanCollectFeatures::FeatureIndex>
     ProteanCollectFeatures::ScopeToFeatureIndices{
-        inverseMap<ProteanCollectFeatures::Scope,
-                   ProteanCollectFeatures::FeatureIndex>(FeatureIndexToScope)};
+        inverseMap(FeatureIndexToScope, Scope::NumOfScope)};
 
 #define REGISTER_FUNCTION(INDEX_NAME, NAME)                                    \
-  { ProteanCollectFeatures::FeatureIndex::INDEX_NAME, NAME }
-const std::unordered_map<ProteanCollectFeatures::FeatureIndex,
-                         ProteanCollectFeatures::CalculateFeatureFunction>
-    ProteanCollectFeatures::CalculateFeatureMap{
-        REGISTER_FUNCTION(SROASavings, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(SROALosses, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(LoadElimination, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(CallPenalty, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(CallArgumentSetup, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(LoadRelativeIntrinsic, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(LoweredCallArgSetup, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(IndirectCallPenalty, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(JumpTablePenalty, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(CaseClusterPenalty, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(SwitchPenalty, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(SwitchDefaultDestPenalty,
-                          calculateInlineCostFeatures),
-        REGISTER_FUNCTION(UnsimplifiedCommonInstructions,
-                          calculateInlineCostFeatures),
-        REGISTER_FUNCTION(NumLoops, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(DeadBlocks, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(SimplifiedInstructions, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(ConstantArgs, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(ConstantOffsetPtrArgs, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(CallSiteCost, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(ColdCcPenalty, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(LastCallToStaticBonus, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(IsMultipleBlocks, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(NestedInlines, calculateInlineCostFeatures),
-        REGISTER_FUNCTION(NestedInlineCostEstimate,
-                          calculateInlineCostFeatures),
-        REGISTER_FUNCTION(Threshold, calculateThreshold),
-        REGISTER_FUNCTION(BasicBlockCount, calculateFPIRelated),
-        REGISTER_FUNCTION(BlocksReachedFromConditionalInstruction,
-                          calculateFPIRelated),
-        REGISTER_FUNCTION(Uses, calculateFPIRelated),
-        REGISTER_FUNCTION(EdgeCount, calculateEdgeNodeCount),
-        REGISTER_FUNCTION(NodeCount, calculateEdgeNodeCount),
-        REGISTER_FUNCTION(ColdCallSite, calculateHotColdCallSite),
-        REGISTER_FUNCTION(HotCallSite, calculateHotColdCallSite),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesInitialSize,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesBlocks,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesCalls,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsLocal,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsLinkOnceODR,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsLinkOnce,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesLoops,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesMaxLoopDepth,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesMaxDomTreeLevel,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesPtrArgs,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesPtrCallee,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesCallReturnPtr,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesConditionalBranch,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesCBwithArg,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesCallerHeight,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesCallUsage,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsRecursive,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesNumCallsiteInLoop,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesNumOfCallUsesInLoop,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesEntryBlockFreq,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesInstructionPerBlock,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesSuccessorPerBlock,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesAvgVecInstr,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesAvgNestedLoopLevel,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(ProteanFIExtendedFeaturesInstrPerLoop,
-                          calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(
-            ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
-            calculateProteanFIExtendedFeaturesFeatures),
-        REGISTER_FUNCTION(CallerBlockFreq, calculateCallerBlockFreq),
-        REGISTER_FUNCTION(CallSiteHeight, calculateCallSiteHeight),
-        REGISTER_FUNCTION(ConstantParam, calculateConstantParam),
-        REGISTER_FUNCTION(CostEstimate, calculateCostEstimate),
-        REGISTER_FUNCTION(LoopLevel, calculateLoopLevel),
-        REGISTER_FUNCTION(MandatoryKind, calculateMandatoryKind),
-        REGISTER_FUNCTION(MandatoryOnly, calculateMandatoryOnly),
-        REGISTER_FUNCTION(OptCode, calculateOptCode),
-        REGISTER_FUNCTION(IsIndirectCall, calculateIsIndirectCall),
-        REGISTER_FUNCTION(IsInInnerLoop, calculateIsInInnerLoop),
-        REGISTER_FUNCTION(IsMustTailCall, calculateIsMustTailCall),
-        REGISTER_FUNCTION(IsTailCall, calculateIsTailCall),
-        REGISTER_FUNCTION(TripCount, calculateTripCount),
-        REGISTER_FUNCTION(MaxTripCount, calculateTripCount),
-        REGISTER_FUNCTION(LoopSize, calculateLoopSize),
-        REGISTER_FUNCTION(InitialIVValueInt, calculateIVValueFeatures),
-        REGISTER_FUNCTION(FinalIVValueInt, calculateIVValueFeatures),
-        REGISTER_FUNCTION(StepValueInt, calculateIVValueFeatures),
-        REGISTER_FUNCTION(NumPartitions, calculateLoopSetSize),
-        REGISTER_FUNCTION(IndVarSetSize, calculateLoopSetSize),
-        REGISTER_FUNCTION(AvgStoreSetSize, calculateLoopSetSize),
-        REGISTER_FUNCTION(AvgNumInsts, calculateLoopSetSize),
-        REGISTER_FUNCTION(NumLoadInstPerLoopNest, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(NumStoreInstPerLoopNest, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(TotLoopNestInstCount, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(AvgNumLoadInstPerLoopNest, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(NumLoadInstPerLoop, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(NumStoreInstPerLoop, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(TotLoopInstCount, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(AvgNumLoadInstPerLoop, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(TotBlocksPerLoop, calculateLoopInstFeatures),
-        REGISTER_FUNCTION(IsInnerMostLoop, calculateInnerOuterMostLoop),
-        REGISTER_FUNCTION(IsOuterMostLoop, calculateInnerOuterMostLoop),
-        REGISTER_FUNCTION(MaxLoopHeight, calculateLoopHeight),
-        REGISTER_FUNCTION(IsFixedTripCount, calculateTripCount),
-        REGISTER_FUNCTION(FunctionCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(TotalBBCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(AverageBBPerFunction, calculateModuleInfoCount),
-        REGISTER_FUNCTION(TotalInstructionCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(TotalFunctionCalls, calculateModuleInfoCount),
-        REGISTER_FUNCTION(AverageCallsPerFunction, calculateModuleInfoCount),
-        REGISTER_FUNCTION(MedianCallsPerFunction, calculateModuleInfoCount),
-        REGISTER_FUNCTION(LoopCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(TotalEdgeCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(CriticalEdgeCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(GlobalVariableCount, calculateModuleInfoCount),
-        REGISTER_FUNCTION(AverageInstructionsPerFunction,
-                          calculateModuleInfoCount),
-        REGISTER_FUNCTION(AverageLoadInstructionsPerFunction,
-                          calculateModuleInfoCount),
-        REGISTER_FUNCTION(AverageStoreInstructionsPerFunction,
-                          calculateModuleInfoCount),
-        REGISTER_FUNCTION(SCCSize, calculateFunctionInfo),
-        REGISTER_FUNCTION(AverageComponentSize, calculateFunctionInfo),
-    };
+  Result[ProteanCollectFeatures::FeatureIndex::INDEX_NAME] = NAME
+const llvm::EnumeratedArray<ProteanCollectFeatures::CalculateFeatureFunction,
+                            ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+    ProteanCollectFeatures::CalculateFeatureMap = [] {
+      llvm::EnumeratedArray<ProteanCollectFeatures::CalculateFeatureFunction,
+                            ProteanCollectFeatures::FeatureIndex,
+                            ProteanCollectFeatures::FeatureIndex::NumOfFeatures>
+          Result(nullptr);
+      REGISTER_FUNCTION(SROASavings, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(SROALosses, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(LoadElimination, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(CallPenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(CallArgumentSetup, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(LoadRelativeIntrinsic, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(LoweredCallArgSetup, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(IndirectCallPenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(JumpTablePenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(CaseClusterPenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(SwitchPenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(SwitchDefaultDestPenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(UnsimplifiedCommonInstructions,
+                        calculateInlineCostFeatures);
+      REGISTER_FUNCTION(NumLoops, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(DeadBlocks, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(SimplifiedInstructions, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(ConstantArgs, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(ConstantOffsetPtrArgs, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(CallSiteCost, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(ColdCcPenalty, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(LastCallToStaticBonus, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(IsMultipleBlocks, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(NestedInlines, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(NestedInlineCostEstimate, calculateInlineCostFeatures);
+      REGISTER_FUNCTION(Threshold, calculateThreshold);
+      REGISTER_FUNCTION(BasicBlockCount, calculateFPIRelated);
+      REGISTER_FUNCTION(BlocksReachedFromConditionalInstruction,
+                        calculateFPIRelated);
+      REGISTER_FUNCTION(Uses, calculateFPIRelated);
+      REGISTER_FUNCTION(EdgeCount, calculateEdgeNodeCount);
+      REGISTER_FUNCTION(NodeCount, calculateEdgeNodeCount);
+      REGISTER_FUNCTION(ColdCallSite, calculateHotColdCallSite);
+      REGISTER_FUNCTION(HotCallSite, calculateHotColdCallSite);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesInitialSize,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesBlocks,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesCalls,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsLocal,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsLinkOnceODR,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsLinkOnce,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesLoops,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesMaxLoopDepth,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesMaxDomTreeLevel,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesPtrArgs,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesPtrCallee,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesCallReturnPtr,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesConditionalBranch,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesCBwithArg,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesCallerHeight,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesCallUsage,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesIsRecursive,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesNumCallsiteInLoop,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesNumOfCallUsesInLoop,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesEntryBlockFreq,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesMaxCallsiteBlockFreq,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesInstructionPerBlock,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesSuccessorPerBlock,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesAvgVecInstr,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesAvgNestedLoopLevel,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(ProteanFIExtendedFeaturesInstrPerLoop,
+                        calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(
+          ProteanFIExtendedFeaturesBlockWithMultipleSuccessorsPerLoop,
+          calculateProteanFIExtendedFeaturesFeatures);
+      REGISTER_FUNCTION(CallerBlockFreq, calculateCallerBlockFreq);
+      REGISTER_FUNCTION(CallSiteHeight, calculateCallSiteHeight);
+      REGISTER_FUNCTION(ConstantParam, calculateConstantParam);
+      REGISTER_FUNCTION(CostEstimate, calculateCostEstimate);
+      REGISTER_FUNCTION(LoopLevel, calculateLoopLevel);
+      REGISTER_FUNCTION(MandatoryKind, calculateMandatoryKind);
+      REGISTER_FUNCTION(MandatoryOnly, calculateMandatoryOnly);
+      REGISTER_FUNCTION(OptCode, calculateOptCode);
+      REGISTER_FUNCTION(IsIndirectCall, calculateIsIndirectCall);
+      REGISTER_FUNCTION(IsInInnerLoop, calculateIsInInnerLoop);
+      REGISTER_FUNCTION(IsMustTailCall, calculateIsMustTailCall);
+      REGISTER_FUNCTION(IsTailCall, calculateIsTailCall);
+      REGISTER_FUNCTION(TripCount, calculateTripCount);
+      REGISTER_FUNCTION(MaxTripCount, calculateTripCount);
+      REGISTER_FUNCTION(LoopSize, calculateLoopSize);
+      REGISTER_FUNCTION(InitialIVValueInt, calculateIVValueFeatures);
+      REGISTER_FUNCTION(FinalIVValueInt, calculateIVValueFeatures);
+      REGISTER_FUNCTION(StepValueInt, calculateIVValueFeatures);
+      REGISTER_FUNCTION(NumPartitions, calculateLoopSetSize);
+      REGISTER_FUNCTION(IndVarSetSize, calculateLoopSetSize);
+      REGISTER_FUNCTION(AvgStoreSetSize, calculateLoopSetSize);
+      REGISTER_FUNCTION(AvgNumInsts, calculateLoopSetSize);
+      REGISTER_FUNCTION(NumLoadInstPerLoopNest, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(NumStoreInstPerLoopNest, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(TotLoopNestInstCount, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(AvgNumLoadInstPerLoopNest, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(NumLoadInstPerLoop, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(NumStoreInstPerLoop, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(TotLoopInstCount, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(AvgNumLoadInstPerLoop, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(TotBlocksPerLoop, calculateLoopInstFeatures);
+      REGISTER_FUNCTION(IsInnerMostLoop, calculateInnerOuterMostLoop);
+      REGISTER_FUNCTION(IsOuterMostLoop, calculateInnerOuterMostLoop);
+      REGISTER_FUNCTION(MaxLoopHeight, calculateLoopHeight);
+      REGISTER_FUNCTION(IsFixedTripCount, calculateTripCount);
+      REGISTER_FUNCTION(FunctionCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(TotalBBCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(AverageBBPerFunction, calculateModuleInfoCount);
+      REGISTER_FUNCTION(TotalInstructionCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(TotalFunctionCalls, calculateModuleInfoCount);
+      REGISTER_FUNCTION(AverageCallsPerFunction, calculateModuleInfoCount);
+      REGISTER_FUNCTION(MedianCallsPerFunction, calculateModuleInfoCount);
+      REGISTER_FUNCTION(LoopCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(TotalEdgeCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(CriticalEdgeCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(GlobalVariableCount, calculateModuleInfoCount);
+      REGISTER_FUNCTION(AverageInstructionsPerFunction,
+                        calculateModuleInfoCount);
+      REGISTER_FUNCTION(AverageLoadInstructionsPerFunction,
+                        calculateModuleInfoCount);
+      REGISTER_FUNCTION(AverageStoreInstructionsPerFunction,
+                        calculateModuleInfoCount);
+      REGISTER_FUNCTION(SCCSize, calculateFunctionInfo);
+      REGISTER_FUNCTION(AverageComponentSize, calculateFunctionInfo);
+      return Result;
+    }();
 #undef REGISTER_FUNCTION
 
 std::map<const Function *, unsigned> ProteanCollectFeatures::FunctionLevels{};
@@ -1246,17 +1265,17 @@ std::string ProteanCollectFeatures::getFeature(
 
 std::string ProteanCollectFeatures::getFeatureName(
     ProteanCollectFeatures::FeatureIndex Idx) {
-  return FeatureIndexToName.find(Idx)->second;
+  return FeatureIndexToName[Idx];
 }
 
 ProteanCollectFeatures::GroupID ProteanCollectFeatures::getFeatureGroup(
     ProteanCollectFeatures::FeatureIndex Idx) {
-  return FeatureIndexToGroup.find(Idx)->second;
+  return FeatureIndexToGroup[Idx];
 }
 
 ProteanCollectFeatures::Scope ProteanCollectFeatures::getFeatureScope(
     ProteanCollectFeatures::FeatureIndex Idx) {
-  return FeatureIndexToScope.find(Idx)->second;
+  return FeatureIndexToScope[Idx];
 }
 
 std::set<ProteanCollectFeatures::FeatureIndex>
@@ -1307,20 +1326,21 @@ std::vector<std::string> ProteanCollectFeatures::getAllFeatures() {
   std::vector<std::string> FunctionLevel;
   std::vector<std::string> LoopLevel;
 
-  for (const auto &Info : ProteanCollectFeatures::FeatureIndexToName) {
-    auto ScopeIter = FeatureIndexToScope.find(Info.first);
-    if (ScopeIter == FeatureIndexToScope.end()) {
+  for (auto Idx = FeatureIndex::InlineCostFeatureGroupBegin;
+       Idx != FeatureIndex::NumOfFeatures; ++Idx) {
+    const auto Name = getFeatureName(Idx);
+    auto FeatureScope = getFeatureScope(Idx);
+    if (FeatureScope == Scope::NumOfScope)
       continue;
-    }
-    if (ScopeIter->second == ProteanCollectFeatures::Scope::Module) {
-      ModuleLevel.push_back(Info.second);
-    } else if (ScopeIter->second == ProteanCollectFeatures::Scope::Function) {
-      FunctionLevel.push_back("callee_" + Info.second);
-      FunctionLevel.push_back("caller_" + Info.second);
-    } else if (ScopeIter->second == ProteanCollectFeatures::Scope::CallSite) {
-      FunctionLevel.push_back(Info.second);
-    } else if (ScopeIter->second == ProteanCollectFeatures::Scope::Loop) {
-      LoopLevel.push_back(Info.second);
+    if (FeatureScope == ProteanCollectFeatures::Scope::Module) {
+      ModuleLevel.push_back(Name);
+    } else if (FeatureScope == ProteanCollectFeatures::Scope::Function) {
+      FunctionLevel.push_back("callee_" + Name);
+      FunctionLevel.push_back("caller_" + Name);
+    } else if (FeatureScope == ProteanCollectFeatures::Scope::CallSite) {
+      FunctionLevel.push_back(Name);
+    } else if (FeatureScope == ProteanCollectFeatures::Scope::Loop) {
+      LoopLevel.push_back(Name);
     }
   }
   Res.insert(Res.end(), ModuleLevel.begin(), ModuleLevel.end());
@@ -2523,11 +2543,9 @@ ProteanCollectFeatures::FeatureValueMap ProteanCollectFeatures::getFeaturesPair(
     ProteanCollectFeatures::FeaturesInfo FeatureInfoVec) {
   clearFeatureValueMap();
   for (auto &FeatureInfo : FeatureInfoVec) {
-    auto It = CalculateFeatureMap.find(FeatureInfo.Idx);
-    if (It == CalculateFeatureMap.end()) {
-      assert("Could not find the corresponding function to calculate feature");
-    }
-    auto CalculateFunction = It->second;
+    auto *CalculateFunction = CalculateFeatureMap[FeatureInfo.Idx];
+    assert(CalculateFunction &&
+           "Could not find the corresponding function to calculate feature");
     CalculateFunction(*this, FeatureInfo);
     LLVM_DEBUG(dbgs() << "Protean Feature " << getFeatureName(FeatureInfo.Idx)
                       << ": " << FeatureToValue[FeatureInfo.Idx] << "\n");
@@ -2541,12 +2559,9 @@ ProteanCollectFeatures::FeatureValueMap ProteanCollectFeatures::getFeaturesPair(
   clearFeatureValueMap();
   for (auto Scope : ScopeVec) {
     for (auto FeatureIdx : getScopeFeatures(Scope)) {
-      auto It = CalculateFeatureMap.find(FeatureIdx);
-      if (It == CalculateFeatureMap.end()) {
-        assert(
-            "Could not find the corresponding function to calculate feature");
-      }
-      auto CalculateFunction = It->second;
+      auto *CalculateFunction = CalculateFeatureMap[FeatureIdx];
+      assert(CalculateFunction &&
+             "Could not find the corresponding function to calculate feature");
       CalculateFunction(*this, GlobalFeatureInfo);
       LLVM_DEBUG(dbgs() << "Protean Feature " << getFeatureName(FeatureIdx)
                         << ": " << FeatureToValue[FeatureIdx] << "\n");
@@ -2561,12 +2576,9 @@ ProteanCollectFeatures::FeatureValueMap ProteanCollectFeatures::getFeaturesPair(
   clearFeatureValueMap();
   for (auto GroupID : GroupIDVec) {
     for (auto FeatureIdx : getGroupFeatures(GroupID)) {
-      auto It = CalculateFeatureMap.find(FeatureIdx);
-      if (It == CalculateFeatureMap.end()) {
-        assert(
-            "Could not find the corresponding function to calculate feature");
-      }
-      auto CalculateFunction = It->second;
+      auto *CalculateFunction = CalculateFeatureMap[FeatureIdx];
+      assert(CalculateFunction &&
+             "Could not find the corresponding function to calculate feature");
       CalculateFunction(*this, GlobalFeatureInfo);
       LLVM_DEBUG(dbgs() << "Protean Feature " << getFeatureName(FeatureIdx)
                         << ": " << FeatureToValue[FeatureIdx] << "\n");
@@ -2581,11 +2593,9 @@ ProteanCollectFeatures::FeatureValueMap ProteanCollectFeatures::getFeaturesPair(
     ProteanCollectFeatures::FeatureIndex End) {
   assert(Beg <= End);
   for (auto Idx = Beg; Idx != End; ++Idx) {
-    auto It = CalculateFeatureMap.find(Idx);
-    if (It == CalculateFeatureMap.end()) {
-      assert("Could not find the corresponding function to calculate feature");
-    }
-    auto CalculateFunction = It->second;
+    auto *CalculateFunction = CalculateFeatureMap[Idx];
+    assert(CalculateFunction &&
+           "Could not find the corresponding function to calculate feature");
     CalculateFunction(*this, GlobalFeatureInfo);
     LLVM_DEBUG(dbgs() << "Protean Feature " << getFeatureName(Idx) << ": "
                       << FeatureToValue[Idx] << "\n");

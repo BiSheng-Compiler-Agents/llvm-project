@@ -1,4 +1,5 @@
 ; REQUIRES: ACPO_AOT
+; REQUIRES: asserts
 ; RUN: protean -protean -debug-only=protean --max-iterations=1 --debug-only=ir2score --use-protean-collect=false -o %t0 %s 2>&1 >%t0.log
 ; RUN: protean -protean -debug-only=protean --max-iterations=1 --debug-only=ir2score --use-protean-collect=true  -o %t1 %s 2>&1 >%t1.log
 
