@@ -466,8 +466,8 @@ public:
   static std::string getFeatureName(FeatureIndex Idx);
   static GroupID getFeatureGroup(FeatureIndex Idx);
   static Scope getFeatureScope(FeatureIndex Idx);
-  static std::set<FeatureIndex> getGroupFeatures(GroupID Group);
-  static std::set<FeatureIndex> getScopeFeatures(Scope S);
+  static auto getGroupFeatures(GroupID Group);
+  static auto getScopeFeatures(Scope S);
 
   static std::vector<std::string> getAllFeatures();
 

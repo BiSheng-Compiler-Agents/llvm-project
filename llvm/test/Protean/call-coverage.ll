@@ -23,45 +23,44 @@
 ; CSV-NEXT: [[MODULE]]|driver|||loop,{{.*}}
 ; CSV-NOT: {{.}}
 
-; There are two calls in caller and one in driver. Metadata sums caller's
-; features twice (once per call row), and includes it once as driver's callee.
-; Multiple pointer arguments still count as one callsite with pointer arguments.
+; There are two calls in caller and one in driver.
+; Multiple pointer arguments count as one callsite with pointer arguments.
 ; MIXED-DAG: edge_count = 1
 ; MIXED-DAG: total_function_calls = 3
 ; MIXED-DAG: average_calls_per_function = 1.5
 ; MIXED-DAG: median_calls_per_function = 1.5
-; MIXED-DAG: caller_basic_block_count = 9
-; MIXED-DAG: caller_conditionally_executed_blocks = 6
-; MIXED-DAG: caller_users = 5
-; MIXED-DAG: caller_InitialSize = 29
-; MIXED-DAG: caller_Blocks = 9
+; MIXED-DAG: caller_basic_block_count = 6
+; MIXED-DAG: caller_conditionally_executed_blocks = 4
+; MIXED-DAG: caller_users = 3
+; MIXED-DAG: caller_InitialSize = 18
+; MIXED-DAG: caller_Blocks = 6
 ; MIXED-DAG: callee_Calls = 2
-; MIXED-DAG: caller_Calls = 5
-; MIXED-DAG: caller_Loops = 3
-; MIXED-DAG: caller_MaxLoopDepth = 3
-; MIXED-DAG: caller_MaxDomTreeLevel = 6
-; MIXED-DAG: caller_PtrArgs = 6
+; MIXED-DAG: caller_Calls = 3
+; MIXED-DAG: caller_Loops = 2
+; MIXED-DAG: caller_MaxLoopDepth = 2
+; MIXED-DAG: caller_MaxDomTreeLevel = 4
+; MIXED-DAG: caller_PtrArgs = 4
 ; MIXED-DAG: callee_PtrCallee = 2
-; MIXED-DAG: caller_PtrCallee = 5
+; MIXED-DAG: caller_PtrCallee = 3
 ; MIXED-DAG: callee_CallReturnPtr = 2
-; MIXED-DAG: caller_CallReturnPtr = 4
-; MIXED-DAG: caller_ConditionalBranch = 3
+; MIXED-DAG: caller_CallReturnPtr = 2
+; MIXED-DAG: caller_ConditionalBranch = 2
 ; MIXED-DAG: caller_CallerHeight = 1
-; MIXED-DAG: caller_CallUsage = 2
+; MIXED-DAG: caller_CallUsage = 1
 ; MIXED-DAG: callee_NumCallsiteInLoop = 2
-; MIXED-DAG: caller_NumCallsiteInLoop = 5
+; MIXED-DAG: caller_NumCallsiteInLoop = 3
 ; MIXED-DAG: callee_NumOfCallUsesInLoop = 1
-; MIXED-DAG: caller_NumOfCallUsesInLoop = 2
-; MIXED-DAG: caller_SuccessorPerBlock = 3
-; MIXED-DAG: caller_AvgNestedLoopLevel = 3
-; MIXED-DAG: caller_InstrPerLoop = 12
-; MIXED-DAG: caller_BlockWithMultipleSuccessorsPerLoop = 3
+; MIXED-DAG: caller_NumOfCallUsesInLoop = 1
+; MIXED-DAG: caller_SuccessorPerBlock = 2
+; MIXED-DAG: caller_AvgNestedLoopLevel = 2
+; MIXED-DAG: caller_InstrPerLoop = 7
+; MIXED-DAG: caller_BlockWithMultipleSuccessorsPerLoop = 2
 ; MIXED-DAG: nr_ctant_params = 1
 ; MIXED-DAG: is_indirect = 1
 ; MIXED-DAG: loop_level = 3
 ; MIXED-DAG: is_in_inner_loop = 3
-; MIXED-DAG: caller_scc_count = 9
-; MIXED-DAG: caller_average_component_size = 3
+; MIXED-DAG: caller_scc_count = 6
+; MIXED-DAG: caller_average_component_size = 2
 
 ; Calls without a directly available body still contribute callsite features.
 ; SINGLE-DAG: total_function_calls = 1

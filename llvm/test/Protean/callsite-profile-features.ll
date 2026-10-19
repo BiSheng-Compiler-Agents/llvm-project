@@ -11,7 +11,7 @@
 ; CHECK-DAG: hot_callsite = 2
 ; CHECK-DAG: block_freq = 3.61717335e+16
 ; CHECK-DAG: callsite_height = 5
-; CHECK-DAG: caller_CallerHeight = 5
+; CHECK-DAG: caller_CallerHeight = 1
 ; CHECK-DAG: is_indirect = 2
 
 declare void @external()
