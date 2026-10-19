@@ -97,27 +97,27 @@ void ModelDataCollector::collectFeatures(Loop *L, const std::string &ModuleName,
                                          const std::string &FuncName,
                                          const std::string &LoopName) {}
 
+ProteanCollectFeatures::FeatureValueMap
+ModelDataCollector::collectRegisteredFeatures(
+    const ProteanFeatureCollectInfo &Info) {
+  if (Info.FeaturesInfo)
+    return Info.FeatureCollector->getFeaturesPair(*Info.FeaturesInfo);
+  if (Info.RegisteredScopes) {
+    Info.FeatureCollector->setGlobalFeatureInfo(*Info.GlobalInfo);
+    return Info.FeatureCollector->getFeaturesPair(*Info.RegisteredScopes);
+  }
+  if (Info.RegisteredGroupIDs) {
+    Info.FeatureCollector->setGlobalFeatureInfo(*Info.GlobalInfo);
+    return Info.FeatureCollector->getFeaturesPair(*Info.RegisteredGroupIDs);
+  }
+  outs() << "No Features are collected, since the given "
+            "FeatureCollectInfo is invalid.\n";
+  return {};
+}
+
 void ModelDataCollector::proteanCollectFeatures() {
   for (auto &FeatureCollectInfo : ProteanFeatureCollectInfos) {
-    ProteanCollectFeatures::FeatureValueMap FeatureMap;
-    if (FeatureCollectInfo->FeaturesInfo.get()) {
-      FeatureMap = FeatureCollectInfo->FeatureCollector->getFeaturesPair(
-          *FeatureCollectInfo->FeaturesInfo.get());
-    } else if (FeatureCollectInfo->RegisteredScopes.get()) {
-      FeatureCollectInfo->FeatureCollector->setGlobalFeatureInfo(
-          *FeatureCollectInfo->GlobalInfo.get());
-      FeatureMap = FeatureCollectInfo->FeatureCollector->getFeaturesPair(
-          *FeatureCollectInfo->RegisteredScopes.get());
-    } else if (FeatureCollectInfo->RegisteredGroupIDs.get()) {
-      FeatureCollectInfo->FeatureCollector->setGlobalFeatureInfo(
-          *FeatureCollectInfo->GlobalInfo.get());
-      FeatureMap = FeatureCollectInfo->FeatureCollector->getFeaturesPair(
-          *FeatureCollectInfo->RegisteredGroupIDs.get());
-    } else {
-      outs() << "No Features are collected, since the given "
-                "FeatureCollectInfo is invalid.\n";
-      return;
-    }
+    auto FeatureMap = collectRegisteredFeatures(*FeatureCollectInfo);
     for (auto const &[key, val] : FeatureMap) {
       std::string FeatureName;
       if (FeatureCollectInfo->Prefix != "")

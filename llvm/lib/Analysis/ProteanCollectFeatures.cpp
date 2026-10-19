@@ -13,8 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ProteanCollectFeatures.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/EnumeratedArray.h"
 #include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
@@ -171,10 +173,12 @@ public:
         {CB->getCalledFunction(), CB, GlobalBB, GlobalM, nullptr},
         {MandatoryOnly, IA}};
 
-    registerFeature({ProteanCollectFeatures::Scope::Function}, CalleeInfo,
-                    "callee");
-    registerFeature({ProteanCollectFeatures::Scope::Function}, CallerInfo,
-                    "caller");
+    if (FeatureDump || !SeenCallees.contains(CalleeInfo.SI.F))
+      registerFeature({ProteanCollectFeatures::Scope::Function}, CalleeInfo,
+                      "callee");
+    if (FeatureDump || !SeenCallers.contains(CallerInfo.SI.F))
+      registerFeature({ProteanCollectFeatures::Scope::Function}, CallerInfo,
+                      "caller");
     registerFeature({ProteanCollectFeatures::Scope::CallSite},
                     GlobalFeatureInfo);
     ModelDataCollector::proteanCollectFeatures();
@@ -243,9 +247,13 @@ public:
   void updateOutput(bool PrintHeader, Module *M, Function *F, CallBase *CB,
                     Loop *L) {
     if (PrintHeader) {
-      TempOutput += printHeader(M, F, CB, L);
+      if (FeatureDump)
+        TempOutput += printHeader(M, F, CB, L);
       return;
     }
+    accumulateFeatures(M, CB, L);
+    if (!FeatureDump)
+      return;
     std::string Out = "";
     Out += encodeIdentifier(M->getName()) + ",";
     if (F)
@@ -297,17 +305,8 @@ public:
   void addModuleFlags(Module *M) {
     std::vector<std::string> AllFeatures =
         ProteanCollectFeatures::getAllFeatures();
-    std::unordered_map<std::string, float> FinalFeatures;
     for (const std::string &Feature : AllFeatures) {
-      FinalFeatures[Feature] = 0;
-    }
-
-    for (auto &FeatureValues : RowsFeatureValues) {
-      for (const std::string &Feature : AllFeatures) {
-        if (FeatureValues.find(Feature) != FeatureValues.end()) {
-          FinalFeatures[Feature] += std::stof(FeatureValues[Feature]);
-        }
-      }
+      FinalFeatures.try_emplace(Feature, 0);
     }
 
     std::vector<Metadata *> HeaderData;
@@ -328,9 +327,6 @@ public:
       M->addModuleFlag(llvm::Module::Append, HEADER_FLAG, HeaderNode);
       M->addModuleFlag(llvm::Module::Append, VALUE_FLAG, ValueNode);
     }
-
-    LLVM_DEBUG(llvm::errs() << "RowsFeatureValues.size() = "
-             << RowsFeatureValues.size() << "\n");
 
     size_t NonZero = 0;
     for (const auto &P : FinalFeatures) {
@@ -530,8 +526,6 @@ public:
     std::vector<std::string> AllFeatures =
         ProteanCollectFeatures::getAllFeatures();
     std::vector<std::string> IndexToFeature;
-    std::unordered_map<std::string, std::string> ModuleFeaturesValues;
-    bool ModuleLevel = true;
 
     for (std::string Line : Lines) {
       if (Line[0] == '-') {
@@ -548,18 +542,15 @@ public:
         for (const std::string &Value : Values) {
           const std::string &Feature = IndexToFeature[Idx];
           FeatureValues[Feature] = Value;
-          if (ModuleLevel) {
-            ModuleFeaturesValues[Feature] = Value;
-          }
           Idx++;
         }
         RowsFeatureValues.push_back(FeatureValues);
-
-        if (ModuleLevel) {
-          ModuleLevel = false;
-        }
       }
     }
+
+    LLVM_DEBUG(llvm::errs() << "RowsFeatureValues.size() = "
+                            << RowsFeatureValues.size() << "\n");
+
     std::string Out = "";
     OutputHeader = "Module|Function|Callee|Caller|Loop,";
     for (const std::string &Feature : AllFeatures)
@@ -571,9 +562,7 @@ public:
              FeatureValues["Function"] + '|' + FeatureValues["Callee"] + '|' +
              FeatureValues["Caller"] + '|' + FeatureValues["Loop"] + ',';
       for (const std::string &Feature : AllFeatures) {
-        if (ModuleFeaturesValues.count(Feature)) {
-          Out += ModuleFeaturesValues[Feature];
-        } else if (FeatureValues.count(Feature)) {
+        if (FeatureValues.count(Feature)) {
           Out += FeatureValues[Feature];
         } else {
           Out += "0";
@@ -613,6 +602,66 @@ public:
   bool getOnlyMandatory() { return OnlyMandatory; }
 
 private:
+  ProteanCollectFeatures::FeatureValueMap
+  collectRegisteredFeatures(const ProteanFeatureCollectInfo &Info) override {
+    if (!Info.RegisteredScopes || Info.RegisteredScopes->size() != 1 ||
+        Info.RegisteredScopes->front() !=
+            ProteanCollectFeatures::Scope::Function)
+      return ModelDataCollector::collectRegisteredFeatures(Info);
+
+    const Function *F = Info.GlobalInfo->SI.F;
+    auto [It, Inserted] = FunctionFeatureCache.try_emplace(F);
+    if (Inserted) {
+      LLVM_DEBUG(dbgs() << "Collecting Protean function features: "
+                        << (F ? F->getName() : "<indirect>") << '\n');
+      It->second = ModelDataCollector::collectRegisteredFeatures(Info);
+    }
+    return It->second;
+  }
+
+  // Function features are independent of their callsite and caller/callee role.
+  // Lifespan: one pass invocation, since IR is unchanged during collection.
+  DenseMap<const Function *, ProteanCollectFeatures::FeatureValueMap>
+      FunctionFeatureCache;
+
+  // Count each owner only once in the CSV and module vectors. Keep the
+  // CSV rows, but zero features already contributed by an earlier observation.
+  // Note that caller and callee columns summarize separate populations.
+  void accumulateFeatures(Module *M, CallBase *CB, Loop *L) {
+    bool NewCaller = false;
+    bool NewCallee = false;
+    bool NewOwner;
+    if (CB) {
+      NewCaller = SeenCallers.insert(CB->getCaller()).second;
+      NewCallee = SeenCallees.insert(CB->getCalledFunction()).second;
+      NewOwner = SeenCallSites.insert(CB).second;
+    } else if (L) {
+      NewOwner = SeenLoops.insert(L).second;
+    } else {
+      NewOwner = SeenModules.insert(M).second;
+    }
+
+    for (auto &[Name, Value] : Features) {
+      bool Include = NewOwner;
+      if (CB) {
+        if (StringRef(Name).starts_with("caller_"))
+          Include = NewCaller;
+        else if (StringRef(Name).starts_with("callee_"))
+          Include = NewCallee;
+      }
+      if (Include)
+        FinalFeatures[Name] += std::stof(Value);
+      else
+        Value = "0";
+    }
+  }
+
+  SmallPtrSet<const Module *, 1> SeenModules;
+  SmallPtrSet<const Function *, 16> SeenCallers;
+  SmallPtrSet<const Function *, 16> SeenCallees;
+  SmallPtrSet<const CallBase *, 16> SeenCallSites;
+  SmallPtrSet<const Loop *, 16> SeenLoops;
+  std::unordered_map<std::string, float> FinalFeatures;
   bool OnlyMandatory = false;
   std::string TempOutput = "";
   std::string OutputHeader;
@@ -1373,25 +1422,16 @@ ProteanCollectFeatures::Scope ProteanCollectFeatures::getFeatureScope(
   return FeatureIndexToScope[Idx];
 }
 
-std::set<ProteanCollectFeatures::FeatureIndex>
-ProteanCollectFeatures::getGroupFeatures(
+auto ProteanCollectFeatures::getGroupFeatures(
     ProteanCollectFeatures::GroupID Group) {
-  std::set<ProteanCollectFeatures::FeatureIndex> FeatureIndices;
   auto Range = GroupToFeatureIndices.equal_range(Group);
-  for (auto It = Range.first; It != Range.second; ++It) {
-    FeatureIndices.insert(It->second);
-  }
-  return FeatureIndices;
+  return llvm::make_second_range(llvm::make_range(Range));
 }
 
-std::set<ProteanCollectFeatures::FeatureIndex>
-ProteanCollectFeatures::getScopeFeatures(ProteanCollectFeatures::Scope S) {
-  std::set<ProteanCollectFeatures::FeatureIndex> FeatureIndices;
+auto ProteanCollectFeatures::getScopeFeatures(ProteanCollectFeatures::Scope S) {
+  std::vector<ProteanCollectFeatures::FeatureIndex> FeatureIndices;
   auto Range = ScopeToFeatureIndices.equal_range(S);
-  for (auto It = Range.first; It != Range.second; ++It) {
-    FeatureIndices.insert(It->second);
-  }
-  return FeatureIndices;
+  return llvm::make_second_range(llvm::make_range(Range));
 }
 
 bool ProteanCollectFeatures::containsFeature(
@@ -3284,10 +3324,11 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
       MDC.updateOutput(/*PrintHeader*/ false, &M, &F, /*CB*/ nullptr, L);
     }
   }
-  MDC.formatOutput();
   MDC.addModuleFlags(&M);
-  if (FeatureDump)
+  if (FeatureDump) {
+    MDC.formatOutput();
     MDC.printOutput(M.getContext());
+  }
   return PreservedAnalyses::all();
 }
 

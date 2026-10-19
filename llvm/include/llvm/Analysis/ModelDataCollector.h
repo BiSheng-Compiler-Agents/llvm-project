@@ -92,6 +92,11 @@ public:
   void resetRegisteredFeatures();
 
 protected:
+  // Collect values before applying the registered prefix and postfix. Derived
+  // collectors can override this to reuse values for unchanged IR.
+  virtual ProteanCollectFeatures::FeatureValueMap
+  collectRegisteredFeatures(const ProteanFeatureCollectInfo &Info);
+
   // Collected features
   std::vector<std::pair<std::string, std::string>> Features;
   // NOTE: OutputFileName being empty (null) is treated as stdout
