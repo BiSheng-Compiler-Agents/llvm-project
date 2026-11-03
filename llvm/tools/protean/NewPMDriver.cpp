@@ -31,6 +31,7 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
@@ -42,6 +43,8 @@
 
 using namespace llvm;
 using namespace opt_tool;
+
+extern cl::opt<bool> UseProteanInitialPasses;
 
 namespace llvm {
 cl::opt<bool> DebugifyEach(
@@ -345,7 +348,7 @@ bool llvm::runPassPipeline(
     bool ShouldPreserveAssemblyUseListOrder,
     bool ShouldPreserveBitcodeUseListOrder, bool EmitSummaryIndex,
     bool EmitModuleHash, bool EnableDebugify, bool VerifyDIPreserve,
-    bool UnifiedLTO) {
+    bool UnifiedLTO, bool TrailingFeatureCollection) {
   bool VerifyEachPass = VK == VK_VerifyEachPass;
 
   auto FS = vfs::getRealFileSystem();
@@ -475,6 +478,12 @@ bool llvm::runPassPipeline(
 
   // Add passes according to the -passes options.
   if (!PassPipeline.empty()) {
+    // Disable Protean's initial pipeline.
+    // Expand default<O3> to the full pipeline for the SA baseline and forced
+    // fallback. Restore the flag before execution so SA still publishes
+    // features.
+    SaveAndRestore<bool> DisableInitialPipeline(
+        UseProteanInitialPasses.getValue(), false);
     if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
@@ -507,7 +516,8 @@ bool llvm::runPassPipeline(
         Out->os(), ThinLTOLinkOut ? &ThinLTOLinkOut->os() : nullptr));
     break;
   }
-  MPM.addPass(CollectFeaturesPass());
+  if (TrailingFeatureCollection)
+    MPM.addPass(CollectFeaturesPass());
   FunctionPassManager FPM;
   LoopPassManager LPM;
   FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
