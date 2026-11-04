@@ -1,5 +1,5 @@
 ; REQUIRES: asserts
-; RUN: protean -passes='verify' -debug-only=protean -o %t.out -protean < %s 2>&1 | FileCheck %s
+; RUN: BISHENG_ACPO_DIR=%S/../../../acpo protean -passes='verify' -debug-only=protean -o %t.out -protean < %s 2>&1 | FileCheck %s
 
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @main() {

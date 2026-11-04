@@ -1,4 +1,5 @@
 ; REQUIRES: ACPO_AOT
+; REQUIRES: asserts
 ; RUN: env BISHENG_ACPO_DIR=%S/../../../acpo protean -protean -o %t.bc %s --debug-only=proteanFC 2>&1 | FileCheck %s
 
 @a = global i32 4

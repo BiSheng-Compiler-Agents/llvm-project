@@ -426,6 +426,9 @@ if config.link_llvm_dylib:
         )
     )
 
+if config.acpo_aot:
+    config.available_features.add("ACPO_AOT")
+
 if config.have_tf_aot:
     config.available_features.add("have_tf_aot")
 

@@ -1,6 +1,7 @@
 ; REQUIRES: ACPO_AOT
-; RUN: protean -protean -debug-only=protean -o %t0 %s 2>&1 >%t0.log
-; RUN: protean -protean -debug-only=protean -o %t1 %s 2>&1 >%t1.log
+; REQUIRES: asserts
+; RUN: BISHENG_ACPO_DIR=%S/../../../acpo protean -protean -debug-only=protean -o %t0 %s 2>&1 >%t0.log
+; RUN: BISHENG_ACPO_DIR=%S/../../../acpo protean -protean -debug-only=protean -o %t1 %s 2>&1 >%t1.log
 
 @a = global i32 4
 

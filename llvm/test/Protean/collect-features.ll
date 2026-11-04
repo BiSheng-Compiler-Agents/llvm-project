@@ -11,7 +11,7 @@ define dso_local void @sha_stream() #0 {
   ret void
 }
 
-; CHECK: global_variable_count
-; CHECK: critical_edge_count
-; CHECK: total_edge_count
 ; CHECK: loop_count
+; CHECK: total_edge_count
+; CHECK: critical_edge_count
+; CHECK: global_variable_count
