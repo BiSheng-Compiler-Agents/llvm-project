@@ -40,9 +40,11 @@
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/IR2Vec/IR2Vec.h"
+#include "llvm/Analysis/IR2Vec.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Process.h"
@@ -84,13 +86,67 @@ struct SharedMemoryData {
 extern llvm::cl::opt<std::string> ProteanModelFile;
 extern llvm::cl::opt<std::string> ProteanLoopModelFile;
 
-// In "llvm/lib/Passes/PassBuilderPipelines.cpp"
-extern llvm::cl::opt<bool> UseProteanInitialPasses;
 using namespace LoopTools;
 namespace llvm {
+
+cl::opt<bool> UseProteanInitialPasses(
+  "protean", cl::init(false), cl::Hidden,
+  cl::desc("Enable Protean Compiler initial pass set in place of default pass"
+           " sequence"));
+
 static cl::opt<bool> FeatureDump("enable-protean-feature-dump", cl::init(false));
 static cl::opt<bool> EnableLoopCollectFeature("enable-loop-collect-feature",
                                               cl::init(false));
+
+// Module-embedding helper for IR2VEC
+llvm::ir2vec::Embedding
+computeProteanModuleEmbedding(const llvm::Module &M) {
+  using namespace llvm;
+
+  if (ir2vec::VocabFile.getValue().empty())
+    report_fatal_error(
+        "Protean requires --ir2vec-vocab-path=<vocabulary.json>");
+
+  auto VocabOrErr = ir2vec::Vocabulary::fromFile(
+      ir2vec::VocabFile.getValue(),
+      ir2vec::OpcWeight.getValue(),
+      ir2vec::TypeWeight.getValue(),
+      ir2vec::ArgWeight.getValue());
+
+  if (!VocabOrErr) {
+    errs() << "Protean: failed to load IR2Vec vocabulary: "
+           << toString(VocabOrErr.takeError()) << '\n';
+    report_fatal_error("Cannot compute Protean IR2Vec features");
+  }
+
+  auto &Vocab = *VocabOrErr;
+
+  if (!Vocab.isValid())
+    report_fatal_error("Invalid Protean IR2Vec vocabulary");
+
+  if (Vocab.getDimension() != IR2VEC_DIMENSION) {
+    errs() << "Protean: vocabulary dimension "
+           << Vocab.getDimension()
+           << " does not match model dimension "
+           << IR2VEC_DIMENSION << '\n';
+    report_fatal_error("Protean IR2Vec dimension mismatch");
+  }
+
+  ir2vec::Embedding ProgramVector(Vocab.getDimension(), 0.0);
+
+  for (const Function &F : M) {
+    if (F.isDeclaration())
+      continue;
+
+    auto Embedder =
+        ir2vec::Embedder::create(IR2VecKind::FlowAware, F, Vocab);
+
+    ProgramVector += Embedder->getFunctionVector();
+  }
+
+  return ProgramVector;
+}
+
 
 class ModelDataProteanCollector : public ModelDataCollector {
 public:
@@ -295,14 +351,15 @@ public:
       if (shareModule())
         writeModule(M);
       else {
-        auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
-        LLVM_DEBUG(
-            dbgs() << "IR2Vec embedding: ";
-            for (double i : ir2vec.getProgramVector()) {
-              dbgs() << i << ' ';
-            }
-            dbgs() << '\n';);
-        writeFeatures(FinalFeatures, ir2vec.getProgramVector());
+        auto ProgramVector = computeProteanModuleEmbedding(*M);
+        LLVM_DEBUG({
+          dbgs() << "IR2Vec embedding: ";
+          for (double i : ProgramVector) {
+            dbgs() << i << ' ';
+          }
+          dbgs() << '\n';
+        });
+        writeFeatures(FinalFeatures, ProgramVector);
       }
     }
   }
@@ -337,9 +394,10 @@ public:
     return result;
   }
 
-  void writeFeatures(std::unordered_map<std::string, float> FinalFeatures, IR2Vec::Vector &pgmVector) {
-    // Append PID when naming shared memory object to enable parallel
-    // compilation.
+  void writeFeatures(std::unordered_map<std::string, float> FinalFeatures, 
+                     const llvm::ir2vec::Embedding &pgmVector) {
+    // Append PID when naming shared memory object
+    //  to enable parallel compilation.
     llvm::sys::Process::Pid Pid = getppid();
     const std::string ShmBase = "/shm_" + std::to_string(Pid);
     const char *shm_name = ShmBase.c_str();
@@ -372,11 +430,23 @@ public:
       return;
     }
 
-    double *ir2vec_ptr = (double*) ((char*)shared_data + shared_data->dataOffset);
+    if (pgmVector.size() != shared_data->ir2vec_dimension) {
+      errs() << "Protean: embedding dimension " << pgmVector.size()
+             << " differs from shared-memory dimension "
+             << shared_data->ir2vec_dimension << '\n';
 
-    for (int i = 0; i < shared_data->ir2vec_dimension; ++i) {
-      memcpy(ir2vec_ptr, &pgmVector[i], sizeof(double));
-      ir2vec_ptr += 1;
+      munmap(shared_data, shm_size);
+      close(shm_fd);
+      report_fatal_error("Protean shared-memory embedding mismatch");
+    }
+
+    double *ir2vec_ptr = reinterpret_cast<double *>(
+    reinterpret_cast<char *>(shared_data) + shared_data->dataOffset);
+
+    for (size_t I = 0; I < pgmVector.size(); ++I) {
+      const double Value = pgmVector[I];
+      memcpy(ir2vec_ptr, &Value, sizeof(Value));
+      ++ir2vec_ptr;
     }
 
     char *ptr = (char *)shared_data + shared_data->dataOffset + (sizeof(double) * shared_data->ir2vec_dimension);
@@ -2320,7 +2390,7 @@ void calculateLoopSetSize(ProteanCollectFeatures &ACF,
   DominatorTree *DT = &AR->DT;
   auto *TLI = &AR->TLI;
   auto *TTI = &AR->TTI;
-  LoopAccessInfoManager LAIs(*SE, *AA, *DT, *LI, TTI, TLI);
+  LoopAccessInfoManager LAIs(*SE, *AA, *DT, *LI, TTI, TLI, &AR->AC);
   const LoopAccessInfo *NewLAI = &LAIs.getInfo(*L);
   LoopPartitionGraph LPG(L, SE, DT, LI, NewLAI);
 
@@ -2426,13 +2496,13 @@ void calculateLoopSize(ProteanCollectFeatures &ACF,
   // that each loop has at least three instructions (likely a conditional
   // branch, a comparison feeding that branch, and some kind of loop increment
   // feeding that comparison instruction).
-  if (LoopSize.isValid() && *LoopSize.getValue() < BEInsns + 1) {
+  if (LoopSize.isValid() && LoopSize.getValue() < BEInsns + 1) {
     // This is an open coded max() on InstructionCost
     LoopSize = BEInsns + 1;
   }
 
   ACF.setFeatureValueAndInfo(ProteanCollectFeatures::FeatureIndex::LoopSize,
-                             Info, std::to_string(*LoopSize.getValue()));
+                             Info, std::to_string(LoopSize.getValue()));
 }
 
 void calculateIsIndirectCall(ProteanCollectFeatures &ACF,
@@ -2822,8 +2892,7 @@ void ProteanFIExtendedFeatures::updateLoopRelatedFeatures(
       unsigned SuccCount = std::distance(succ_begin(BB), succ_end(BB));
       if (SuccCount > 1)
         BlockWithMulSuccNum++;
-      LoopInstrCount += std::distance(BB->instructionsWithoutDebug().begin(),
-                                      BB->instructionsWithoutDebug().end());
+      LoopInstrCount += BB->size();
     }
   }
 
@@ -2866,7 +2935,7 @@ void ProteanFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
   // Sum number of instructions and successors on the way
   for (auto &BB : F) {
     SuccNum += std::distance(succ_begin(&BB), succ_end(&BB));
-    for (auto &I : BB.instructionsWithoutDebug()) {
+    for (auto &I : BB) {
       if (CallBase *CB = dyn_cast<CallBase>(&I)) {
         Function *Callee = CB->getCalledFunction();
         if (Callee && !Callee->isIntrinsic()) {
@@ -2928,25 +2997,24 @@ void ProteanFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
       }
 
       // If this is a conditional branch, check if it uses an argument
-      if (const auto II = dyn_cast<BranchInst>(&I))
-        if (II->isConditional()) {
-          FF[NamedFeatureIndex::ConditionalBranch]++;
-          // find the instruction where the condition is defined.
-          if (auto def = dyn_cast<Instruction>(II->getCondition())) {
-            // For all operands of def check if isa<Argument> (operand) then
-            // increment CBwithArg.
-            bool found = false;
-            for (unsigned i = 0; i < def->getNumOperands(); i++) {
-              if (isa<Argument>(def->getOperand(i))) {
-                FF[NamedFeatureIndex::CBwithArg]++;
-                found = true;
-                break;
-              }
-            }
-            if (found)
+      if (const auto *II = dyn_cast<CondBrInst>(&I)) {
+        FF[NamedFeatureIndex::ConditionalBranch]++;
+
+        if (auto *Def = dyn_cast<Instruction>(II->getCondition())) {
+          bool Found = false;
+
+          for (unsigned OpIdx = 0; OpIdx < Def->getNumOperands(); ++OpIdx) {
+            if (isa<Argument>(Def->getOperand(OpIdx))) {
+              FF[NamedFeatureIndex::CBwithArg]++;
+              Found = true;
               break;
+            }
           }
+
+          if (Found)
+            break;
         }
+      }
     }
   }
 
@@ -3039,7 +3107,7 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
       AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
   auto &IAA = AM.getResult<InlineAdvisorAnalysis>(M);
-  InlineParams Params = getInlineParams(3, 3);
+  InlineParams Params = getInlineParamsFromOptLevel(3);
   IAA.tryCreate(
       Params, InliningAdvisorMode::Default, {},
       InlineContext{ThinOrFullLTOPhase::None, InlinePass::ModuleInliner});
@@ -3110,7 +3178,7 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
 #else
     LoopStandardAnalysisResults LSAR = {AA,  AC,  DT,      LI,      SE,
 #endif
-                                        TLI, TTI, nullptr, nullptr, nullptr};
+                                        TLI, TTI, nullptr};
     for (Loop *L : LI) {
       MDC.collectLoopFeatures(L, &LSAR, &LAM);
       if (!LoopIsCollected) {

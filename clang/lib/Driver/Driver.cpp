@@ -222,42 +222,13 @@ std::string CUIDOptions::getCUID(StringRef InputFile,
 bool isProteanOptimizerEnabled() { return ProteanOptimizerFlag; }
 void enableProteanOptimizer() { ProteanOptimizerFlag = true; }
 
-// static
-std::string Driver::GetResourcesPath(StringRef BinaryPath,
-                                     StringRef CustomResourceDir) {
-  // Since the resource directory is embedded in the module hash, it's important
-  // that all places that need it call this function, so that they get the
-  // exact same string ("a/../b/" and "b/" get different hashes, for example).
-
-  // Dir is bin/ or lib/, depending on where BinaryPath is.
-  std::string Dir = std::string(llvm::sys::path::parent_path(BinaryPath));
-
-  SmallString<128> P(Dir);
-  if (CustomResourceDir != "") {
-    llvm::sys::path::append(P, CustomResourceDir);
-  } else {
-    // On Windows, libclang.dll is in bin/.
-    // On non-Windows, libclang.so/.dylib is in lib/.
-    // With a static-library build of libclang, LibClangPath will contain the
-    // path of the embedding binary, which for LLVM binaries will be in bin/.
-    // ../lib gets us to lib/ in both cases.
-    P = llvm::sys::path::parent_path(Dir);
-    // This search path is also created in the COFF driver of lld, so any
-    // changes here also needs to happen in lld/COFF/Driver.cpp
-    llvm::sys::path::append(P, CLANG_INSTALL_LIBDIR_BASENAME, "clang",
-                            CLANG_VERSION_MAJOR_STRING);
-  }
-
-  return std::string(P);
-}
-
 Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
                DiagnosticsEngine &Diags, std::string Title,
                IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS)
     : Diags(Diags), VFS(std::move(VFS)), Mode(GCCMode),
       SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone),
       Offload(OffloadHostDevice), CXX20HeaderType(HeaderMode_None),
-      ModulesModeCXX20(false), DriverExecutable(DriverExecutable),
+      ModulesModeCXX20(false), DriverExecutable(ClangExecutable),
       SysRoot(DEFAULT_SYSROOT), DriverTitle(Title), CCCPrintBindings(false),
       CCPrintOptions(false), CCLogDiagnostics(false), CCGenDiagnostics(false),
       CCPrintProcessStats(false), CCPrintInternalStats(false),
@@ -3463,155 +3434,7 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
 }
 
 void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
-                             const InputList &Inputs,
-                             ActionList &Actions) const {
-
-  // Ignore /Yc/Yu if both /Yc and /Yu passed but with different filenames.
-  Arg *YcArg = Args.getLastArg(options::OPT__SLASH_Yc);
-  Arg *YuArg = Args.getLastArg(options::OPT__SLASH_Yu);
-  if (YcArg && YuArg && strcmp(YcArg->getValue(), YuArg->getValue()) != 0) {
-    Diag(clang::diag::warn_drv_ycyu_different_arg_clang_cl);
-    Args.eraseArg(options::OPT__SLASH_Yc);
-    Args.eraseArg(options::OPT__SLASH_Yu);
-    YcArg = YuArg = nullptr;
-  }
-  if (YcArg && Inputs.size() > 1) {
-    Diag(clang::diag::warn_drv_yc_multiple_inputs_clang_cl);
-    Args.eraseArg(options::OPT__SLASH_Yc);
-    YcArg = nullptr;
-  }
-
-  Arg *FinalPhaseArg;
-  phases::ID FinalPhase = getFinalPhase(Args, &FinalPhaseArg);
-
-  if (FinalPhase == phases::Link) {
-    if (Args.hasArgNoClaim(options::OPT_hipstdpar)) {
-      Args.AddFlagArg(nullptr, getOpts().getOption(options::OPT_hip_link));
-      Args.AddFlagArg(nullptr,
-                      getOpts().getOption(options::OPT_frtlib_add_rpath));
-    }
-    // Emitting LLVM while linking disabled except in HIPAMD Toolchain
-    if (Args.hasArg(options::OPT_emit_llvm) && !Args.hasArg(options::OPT_hip_link))
-      Diag(clang::diag::err_drv_emit_llvm_link);
-    if (IsCLMode() && LTOMode != LTOK_None &&
-        !Args.getLastArgValue(options::OPT_fuse_ld_EQ)
-             .equals_insensitive("lld"))
-      Diag(clang::diag::err_drv_lto_without_lld);
-
-    // If -dumpdir is not specified, give a default prefix derived from the link
-    // output filename. For example, `clang -g -gsplit-dwarf a.c -o x` passes
-    // `-dumpdir x-` to cc1. If -o is unspecified, use
-    // stem(getDefaultImageName()) (usually stem("a.out") = "a").
-    if (!Args.hasArg(options::OPT_dumpdir)) {
-      Arg *FinalOutput = Args.getLastArg(options::OPT_o, options::OPT__SLASH_o);
-      Arg *Arg = Args.MakeSeparateArg(
-          nullptr, getOpts().getOption(options::OPT_dumpdir),
-          Args.MakeArgString(
-              (FinalOutput ? FinalOutput->getValue()
-                           : llvm::sys::path::stem(getDefaultImageName())) +
-              "-"));
-      Arg->claim();
-      Args.append(Arg);
-    }
-  }
-
-  if (FinalPhase == phases::Preprocess || Args.hasArg(options::OPT__SLASH_Y_)) {
-    // If only preprocessing or /Y- is used, all pch handling is disabled.
-    // Rather than check for it everywhere, just remove clang-cl pch-related
-    // flags here.
-    Args.eraseArg(options::OPT__SLASH_Fp);
-    Args.eraseArg(options::OPT__SLASH_Yc);
-    Args.eraseArg(options::OPT__SLASH_Yu);
-    YcArg = YuArg = nullptr;
-  }
-
-  unsigned LastPLSize = 0;
-  for (auto &I : Inputs) {
-    types::ID InputType = I.first;
-    const Arg *InputArg = I.second;
-
-    auto PL = types::getCompilationPhases(InputType);
-    LastPLSize = PL.size();
-
-    // If the first step comes after the final phase we are doing as part of
-    // this compilation, warn the user about it.
-    phases::ID InitialPhase = PL[0];
-    if (InitialPhase > FinalPhase) {
-      if (InputArg->isClaimed())
-        continue;
-
-      // Claim here to avoid the more general unused warning.
-      InputArg->claim();
-
-      // Suppress all unused style warnings with -Qunused-arguments
-      if (Args.hasArg(options::OPT_Qunused_arguments))
-        continue;
-
-      // Special case when final phase determined by binary name, rather than
-      // by a command-line argument with a corresponding Arg.
-      if (CCCIsCPP())
-        Diag(clang::diag::warn_drv_input_file_unused_by_cpp)
-            << InputArg->getAsString(Args) << getPhaseName(InitialPhase);
-      // Special case '-E' warning on a previously preprocessed file to make
-      // more sense.
-      else if (InitialPhase == phases::Compile &&
-               (Args.getLastArg(options::OPT__SLASH_EP,
-                                options::OPT__SLASH_P) ||
-                Args.getLastArg(options::OPT_E) ||
-                Args.getLastArg(options::OPT_M, options::OPT_MM)) &&
-               getPreprocessedType(InputType) == types::TY_INVALID)
-        Diag(clang::diag::warn_drv_preprocessed_input_file_unused)
-            << InputArg->getAsString(Args) << !!FinalPhaseArg
-            << (FinalPhaseArg ? FinalPhaseArg->getOption().getName() : "");
-      else
-        Diag(clang::diag::warn_drv_input_file_unused)
-            << InputArg->getAsString(Args) << getPhaseName(InitialPhase)
-            << !!FinalPhaseArg
-            << (FinalPhaseArg ? FinalPhaseArg->getOption().getName() : "");
-      continue;
-    }
-
-    if (YcArg) {
-      // Add a separate precompile phase for the compile phase.
-      if (FinalPhase >= phases::Compile) {
-        const types::ID HeaderType = lookupHeaderTypeForSourceType(InputType);
-        // Build the pipeline for the pch file.
-        Action *ClangClPch = C.MakeAction<InputAction>(*InputArg, HeaderType);
-        for (phases::ID Phase : types::getCompilationPhases(HeaderType))
-          ClangClPch = ConstructPhaseAction(C, Args, Phase, ClangClPch);
-        assert(ClangClPch);
-        Actions.push_back(ClangClPch);
-        // The driver currently exits after the first failed command.  This
-        // relies on that behavior, to make sure if the pch generation fails,
-        // the main compilation won't run.
-        // FIXME: If the main compilation fails, the PCH generation should
-        // probably not be considered successful either.
-      }
-    }
-  }
-
-  // If we are linking, claim any options which are obviously only used for
-  // compilation.
-  // FIXME: Understand why the last Phase List length is used here.
-  if (FinalPhase == phases::Link && LastPLSize == 1) {
-    Args.ClaimAllArgs(options::OPT_CompileOnly_Group);
-    Args.ClaimAllArgs(options::OPT_cl_compile_Group);
-  }
-}
-
-void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
                           const InputList &Inputs, ActionList &Actions) const {
-  llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
-
-  // Set protean optimization flag on.
-  if (const Arg *A = Args.getLastArg(options::OPT_O_Group))
-    if (A->getOption().matches(options::OPT_OP))
-      enableProteanOptimizer();
-
-  if (!SuppressMissingInputWarning && Inputs.empty()) {
-    Diag(clang::diag::err_drv_no_input_files);
-    return;
-  }
 
   // Diagnose misuse of /Fo.
   if (Arg *A = Args.getLastArg(options::OPT__SLASH_Fo)) {
@@ -3819,6 +3642,11 @@ static bool shouldBundleHIPAsm(const Compilation &C,
 void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
                           const InputList &Inputs, ActionList &Actions) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
+
+  // Set protean optimization flag on.
+  if (const Arg *A = Args.getLastArg(options::OPT_O_Group))
+    if (A->getOption().matches(options::OPT_OP))
+      enableProteanOptimizer();
 
   if (!SuppressMissingInputWarning && Inputs.empty()) {
     Diag(clang::diag::err_drv_no_input_files);

@@ -28,8 +28,8 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRPrinter/IRPrintingPasses.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
+#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -227,10 +227,6 @@ static cl::opt<bool> DisableLoopUnrolling(
     "disable-loop-unrolling",
     cl::desc("Disable loop unrolling in all relevant passes"), cl::init(false));
 
-namespace llvm {
-extern cl::opt<bool> PrintPipelinePasses;
-} // namespace llvm
-
 template <typename PassManagerT>
 bool tryParsePipelineText(PassBuilder &PB,
                           const cl::opt<std::string> &PipelineOpt) {
@@ -298,19 +294,22 @@ static void registerEPCallbacks(PassBuilder &PB) {
   if (tryParsePipelineText<ModulePassManager>(
           PB, PipelineEarlySimplificationEPPipeline))
     PB.registerPipelineEarlySimplificationEPCallback(
-        [&PB](ModulePassManager &PM, OptimizationLevel) {
+        [&PB](ModulePassManager &PM, OptimizationLevel,
+              ThinOrFullLTOPhase) {
           ExitOnError Err("Unable to parse EarlySimplification pipeline: ");
           Err(PB.parsePassPipeline(PM, PipelineEarlySimplificationEPPipeline));
         });
   if (tryParsePipelineText<ModulePassManager>(PB, OptimizerEarlyEPPipeline))
     PB.registerOptimizerEarlyEPCallback(
-        [&PB](ModulePassManager &PM, OptimizationLevel) {
+        [&PB](ModulePassManager &PM, OptimizationLevel,
+              ThinOrFullLTOPhase) {
           ExitOnError Err("Unable to parse OptimizerEarlyEP pipeline: ");
           Err(PB.parsePassPipeline(PM, OptimizerEarlyEPPipeline));
         });
   if (tryParsePipelineText<ModulePassManager>(PB, OptimizerLastEPPipeline))
     PB.registerOptimizerLastEPCallback(
-        [&PB](ModulePassManager &PM, OptimizationLevel) {
+        [&PB](ModulePassManager &PM, OptimizationLevel,
+              ThinOrFullLTOPhase) {
           ExitOnError Err("Unable to parse OptimizerLastEP pipeline: ");
           Err(PB.parsePassPipeline(PM, OptimizerLastEPPipeline));
         });
@@ -348,27 +347,26 @@ bool llvm::runPassPipeline(
     bool UnifiedLTO) {
   bool VerifyEachPass = VK == VK_VerifyEachPass;
 
-  auto FS = vfs::getRealFileSystem();
   std::optional<PGOOptions> P;
   switch (PGOKindFlag) {
   case InstrGen:
-    P = PGOOptions(ProfileFile, "", "", MemoryProfileFile, FS,
+    P = PGOOptions(ProfileFile, "", "", MemoryProfileFile,
                    PGOOptions::IRInstr, PGOOptions::NoCSAction,
                    PGOColdFuncAttr);
     break;
   case InstrUse:
-    P = PGOOptions(ProfileFile, "", ProfileRemappingFile, MemoryProfileFile, FS,
+    P = PGOOptions(ProfileFile, "", ProfileRemappingFile, MemoryProfileFile,
                    PGOOptions::IRUse, PGOOptions::NoCSAction, PGOColdFuncAttr);
     break;
   case SampleUse:
-    P = PGOOptions(ProfileFile, "", ProfileRemappingFile, MemoryProfileFile, FS,
+    P = PGOOptions(ProfileFile, "", ProfileRemappingFile, MemoryProfileFile,
                    PGOOptions::SampleUse, PGOOptions::NoCSAction,
                    PGOColdFuncAttr);
     break;
   case NoPGO:
     if (DebugInfoForProfiling || PseudoProbeForProfiling ||
         !MemoryProfileFile.empty())
-      P = PGOOptions("", "", "", MemoryProfileFile, FS, PGOOptions::NoAction,
+      P = PGOOptions("", "", "", MemoryProfileFile, PGOOptions::NoAction,
                      PGOOptions::NoCSAction, PGOColdFuncAttr,
                      DebugInfoForProfiling, PseudoProbeForProfiling);
     else
@@ -390,7 +388,7 @@ bool llvm::runPassPipeline(
         P->CSProfileGenFile = CSProfileGenFile;
       } else
         P = PGOOptions("", CSProfileGenFile, ProfileRemappingFile,
-                       /*MemoryProfile=*/"", FS, PGOOptions::NoAction,
+                       /*MemoryProfile=*/"", PGOOptions::NoAction,
                        PGOOptions::CSIRInstr);
     } else /* CSPGOKindFlag == CSInstrUse */ {
       if (!P) {

@@ -17,11 +17,14 @@
 #define LLVM_ANALYSIS_PROTEANCOLLECTFEATURES_H
 
 #include "llvm/Analysis/InlineAdvisor.h"
+#include "llvm/Analysis/IR2Vec.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include <set>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,14 +37,23 @@ const int IR2VEC_EMBEDDING_SIZE = IR2VEC_DIMENSION * sizeof(double);
 namespace llvm {
 class LPMUpdater;
 class Loop;
+class Module;
 
-class LoopCollectFeaturesPass : public PassInfoMixin<LoopCollectFeaturesPass> {
+LLVM_ABI extern cl::opt<bool> UseProteanInitialPasses;
+
+namespace ir2vec {
+struct Embedding;
+}
+
+LLVM_ABI ir2vec::Embedding computeProteanModuleEmbedding(const Module &M);
+
+class LoopCollectFeaturesPass : public OptionalPassInfoMixin<LoopCollectFeaturesPass> {
 public:
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &LAR, LPMUpdater &U);
 };
 
-struct CollectFeaturesPass : PassInfoMixin<CollectFeaturesPass> {
+struct CollectFeaturesPass : OptionalPassInfoMixin<CollectFeaturesPass> {
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 };
 

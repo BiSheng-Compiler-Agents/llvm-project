@@ -40,7 +40,7 @@
 #include "llvm/LinkAllIR.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/MC/TargetRegistry.h"
-#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Remarks/HotnessThresholdParser.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
@@ -73,9 +73,6 @@ using namespace opt_tool;
 #define DEBUG_TYPE "protean"
 
 static codegen::RegisterCodeGenFlags CFG;
-
-// In "llvm/lib/Passes/PassBuilderPipelines.cpp"
-extern cl::opt<bool> UseProteanInitialPasses;
 
 // The OptimizationList is automatically populated with registered Passes by the
 // PassNameParser.
@@ -226,15 +223,9 @@ static cl::opt<std::string> ClDataLayout("data-layout",
                                          cl::value_desc("layout-string"),
                                          cl::init(""));
 
-static cl::opt<bool> PreserveBitcodeUseListOrder(
-    "preserve-bc-uselistorder",
-    cl::desc("Preserve use-list order when writing LLVM bitcode."),
-    cl::init(true), cl::Hidden);
-
-static cl::opt<bool> PreserveAssemblyUseListOrder(
-    "preserve-ll-uselistorder",
-    cl::desc("Preserve use-list order when writing LLVM assembly."),
-    cl::init(false), cl::Hidden);
+// Default writer settings. LLVM owns the command-line option registrations.
+static constexpr bool PreserveBitcodeUseListOrder = true;
+static constexpr bool PreserveAssemblyUseListOrder = false;
 
 static cl::opt<bool> RunTwice("run-twice",
                               cl::desc("Run all passes twice, re-using the "
@@ -517,11 +508,8 @@ int main(int argc, char **argv) {
   initializeTarget(Registry);
   // For codegen passes, only passes that do IR to IR transformation are
   // supported.
-  initializeExpandLargeDivRemLegacyPassPass(Registry);
-  initializeExpandLargeFpConvertLegacyPassPass(Registry);
   initializeScalarizeMaskedMemIntrinLegacyPassPass(Registry);
   initializeSelectOptimizePass(Registry);
-  initializeCallBrPreparePass(Registry);
   initializeCodeGenPrepareLegacyPassPass(Registry);
   initializeAtomicExpandLegacyPass(Registry);
   initializeWinEHPreparePass(Registry);
@@ -534,7 +522,6 @@ int main(int argc, char **argv) {
   initializeInterleavedAccessPass(Registry);
   initializeUnreachableBlockElimLegacyPassPass(Registry);
   initializeExpandReductionsPass(Registry);
-  initializeExpandVectorPredicationPass(Registry);
   initializeWasmEHPreparePass(Registry);
   initializeWriteBitcodePassPass(Registry);
   initializeReplaceWithVeclibLegacyPass(Registry);
@@ -594,7 +581,7 @@ int main(int argc, char **argv) {
   if (!DisableDITypeMap)
     Context.enableDebugTypeODRUniquing();
 
-  Expected<std::unique_ptr<ToolOutputFile>> RemarksFileOrErr =
+  Expected<LLVMRemarkFileHandle> RemarksFileOrErr =
       setupLLVMOptimizationRemarks(Context, RemarksFilename, RemarksPasses,
                                    RemarksFormat, RemarksWithHotness,
                                    RemarksHotnessThreshold);
@@ -602,7 +589,7 @@ int main(int argc, char **argv) {
     errs() << toString(std::move(E)) << '\n';
     return 1;
   }
-  std::unique_ptr<ToolOutputFile> RemarksFile = std::move(*RemarksFileOrErr);
+  LLVMRemarkFileHandle RemarksFile = std::move(*RemarksFileOrErr);
 
   // Load the input module...
   auto SetDataLayout = [](StringRef, StringRef) -> std::optional<std::string> {
@@ -638,7 +625,7 @@ int main(int argc, char **argv) {
 
   // If we are supposed to override the target triple or data layout, do so now.
   if (!TargetTriple.empty())
-    M->setTargetTriple(Triple::normalize(TargetTriple));
+    M->setTargetTriple(Triple(Triple::normalize(TargetTriple)));
 
   // Immediately run the verifier to catch any problems before starting up the
   // pass pipelines.  Otherwise we can crash on broken code during
@@ -701,7 +688,7 @@ int main(int argc, char **argv) {
     CPUStr = codegen::getCPUStr();
     FeaturesStr = codegen::getFeaturesStr();
     Expected<std::unique_ptr<TargetMachine>> ExpectedTM =
-        codegen::createTargetMachineForTriple(ModuleTriple.str(),
+        codegen::createTargetMachineForTriple(ModuleTriple,
                                               GetCodeGenOptLevel());
     if (auto E = ExpectedTM.takeError()) {
       errs() << argv[0] << ": WARNING: failed to create target machine for '"
@@ -718,7 +705,7 @@ int main(int argc, char **argv) {
 
   // Override function attributes based on CPUStr, FeaturesStr, and command line
   // flags.
-  codegen::setFunctionAttributes(CPUStr, FeaturesStr, *M);
+  codegen::setFunctionAttributes(*M, CPUStr, FeaturesStr);
 
   // If the output is set to be emitted to standard out, and standard out is a
   // console, print out a warning message and refuse to do it.  We don't
@@ -741,15 +728,16 @@ int main(int argc, char **argv) {
     TLII.disableAllFunctions();
   else {
     // Disable individual builtin functions in TargetLibraryInfo.
-    LibFunc F;
-    for (auto &FuncName : DisableBuiltins)
-      if (TLII.getLibFunc(FuncName, F))
+    for (auto &FuncName : DisableBuiltins) {
+      LibFunc F = TLII.getLibFunc(FuncName);
+      if (F != NotLibFunc)
         TLII.setUnavailable(F);
       else {
         errs() << argv[0] << ": cannot disable nonexistent builtin function "
                << FuncName << '\n';
         return 1;
       }
+    }
   }
 
   if (UseNPM) {
@@ -793,7 +781,7 @@ int main(int argc, char **argv) {
     //     the Pipeline according to the randomly generated recipe.
     // At the end of the Simulated Annealing loop the parent process will just
     // exit/return from here.
-    if (UseProteanInitialPasses.getValue()) {
+    if (llvm::UseProteanInitialPasses.getValue()) {
       LLVM_DEBUG(dbgs() << "ProteanCompiler :: Beginning Simulated Annealing for Module "
              << M->getName() << "\n");
 
@@ -1028,8 +1016,11 @@ int main(int argc, char **argv) {
 
   if (TM) {
     // FIXME: We should dyn_cast this when supported.
-    auto &LTM = static_cast<LLVMTargetMachine &>(*TM);
-    Pass *TPC = LTM.createPassConfig(Passes);
+    auto *TPC = TM->createPassConfig(Passes);
+    if (!TPC) {
+      errs() << "Target machine pass configuration creation failed.\n";
+      return 1;
+    }
     Passes.add(TPC);
   }
 

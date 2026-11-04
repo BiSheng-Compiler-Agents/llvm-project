@@ -1269,6 +1269,11 @@ if (NOT TENSORFLOW_AOT_PATH STREQUAL "")
     CACHE PATH "Path to the Tensorflow AOT compiler")
   add_subdirectory(${TENSORFLOW_AOT_PATH}/xla_aot_runtime_src
     ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/tf_runtime)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+      target_compile_definitions(tf_xla_runtime_objects PRIVATE
+        EIGEN_NEON_GEBP_NR=4
+    )
+    endif()
   target_include_directories(tf_xla_runtime PUBLIC
     $<BUILD_INTERFACE:${TENSORFLOW_AOT_PATH}/include>)
   install(TARGETS tf_xla_runtime EXPORT LLVMExports

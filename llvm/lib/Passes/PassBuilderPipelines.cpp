@@ -23,6 +23,7 @@
 #include "llvm/Analysis/InlineAdvisor.h"
 #include "llvm/Analysis/InstCount.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
+#include "llvm/Analysis/ProteanCollectFeatures.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/IR/PassManager.h"
@@ -321,14 +322,6 @@ static cl::opt<bool>
     EnableEarlyIndVarSimplify("enable-early-IndVarSimplify", cl::Hidden,
                               cl::desc("Enable early indvarsimplify"),
                               cl::init(false));
-
-cl::opt<bool> UseProteanInitialPasses(
-    "protean", cl::init(false), cl::Hidden,
-    cl::desc("Enable Protean Compiler initial pass set in place of default pass"
-             " sequence"));
-
-namespace llvm {
-extern cl::opt<bool> EnableMemProfContextDisambiguation;
 
 // TODO: There is a similar flag in WPD pass, we should consolidate them by
 // parsing the option only once in PassBuilder and share it across both places.

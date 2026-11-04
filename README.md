@@ -9,12 +9,12 @@
 
 # Protean Compiler Framework
 
-[![LLVM](https://img.shields.io/badge/LLVM-v19.1.7-blue)](https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.1)
+[![LLVM](https://img.shields.io/badge/LLVM-v24-blue)](https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.1)
 
 Welcome to the Protean Compiler project!
 
 This repository contains the source code for Protean, a C/C++ compiler based
-on [LLVM 19.x](https://github.com/llvm/llvm-project/tree/release/19.x) with
+on upstream LLVM [LLVM 24](https://github.com/llvm/llvm-project/tree/main) with
 ML-guided phase ordering capabilities.
 
 Protean's ML model, a.k.a. `IR2Score`, can leverage either our own handcrafted
@@ -31,13 +31,12 @@ compiling their projects with Protean:
 
 ## Build Instuctions
 
-[IR2Vec](https://github.com/IITH-Compilers/IR2Vec) is a submodule in this repository, so you will need to initialize the submodule before building LLVM:
+~~[IR2Vec](https://github.com/IITH-Compilers/IR2Vec) is a submodule in this repository, so you will need to initialize the submodule before building LLVM~~.
 
-```sh
-git submodule update --init --recursive
-```
+Unlike [our LLVM 19 branch](https://github.com/BiSheng-Compiler-Agents/llvm-project/tree/protean-fixed), here we use upstreamed IR2Vec (as an analysis pass) version. We have converted the legacy vocab file `seedEmbeddingVocab300D.json` to the best of our ability, and we use that to generate the emebeddings out of IR. Please note that as a result, the IR2Score model trained with legacy IR2Vec (library version) is not as accurate. This is in our to-do list.
 
-Once the submodule is also checked out, [build LLVM](README-llvm.md) as you
+
+[Build LLVM](README-llvm.md) as you
 normally would with CMake, however, there are a few additional flags to enable Protean's models for IR2Score, i.e., IR2Score w/ IR2VEC Features or IR2Score w/ Protean Features, both of which you can add to be built with LLVM (AOT). We have already provided both precompiled models to both for `X86` and `AARCH64` achitectures under `acpo/overrride`. Refer to [this ACPOModel Deployment README](https://github.com/BiSheng-Compiler-Agents/ACPO/blob/master/README.md#deploying-an-acpomodel-with-llvm) for further instructions on how to generate your own Precompiled models from a Tensorflow's frozen model (`.pb`) file.
 
 For example, build both IR2Score models for an `AARCH64` target (defind with `-DLLVM_ACPO_OVERRIDE_ARCH`) with LLVM:
@@ -48,7 +47,10 @@ mkdir build
 // PATH to your Tensorflow package (tested with Python 3.9 and 3.10)
 export TENSORFLOW_AOT_PATH="/PATH/TO/lib/python3.XXX/site-packages/tensorflow"
 
-// PATH to the ACPO folder
+// PATH to IR2Vec Vocab
+IR2VEC_VOCAB=$PWD/llvm/lib/Analysis/models/seedEmbeddingVocab300D.json
+
+// PATH to the ACPO folder (Protean uses ACPOInterface and its inference routines)
 export BISHENG_ACPO_DIR="$PWD/acpo"
 
 cmake -S "$PWD/llvm" \
@@ -96,7 +98,7 @@ Once the build is verified, you can use protean with IR2VEC feature collection t
 
 ```sh
 $PWD/build/bin/clang -OP -mllvm -protean 
--Wprotean,-use-protean-collect=false,-max-iterations=10,-protean-output-table FOO.cpp
+-Wprotean,-use-protean-collect=false,-max-iterations=10,-protean-output-table,-ir2vec-vocab-path=${IR2VEC_VOCAB} FOO.cpp
 ```
 
 Protean compiler enablement is done via the addition of `-OP -mllvm -protean` to your clang command line arguments. There are many other hyperparameters defined in `Protean.cpp` (`llvm/tools/protean/protean.cpp`) which can be tuned and customized by the addition of `-Wprotean,-PARAM-1,...,PARAM-N`. Similarly, Protean can be added to any project's CMake/Make for enablement during build.
@@ -130,7 +132,7 @@ This work has been accepted by [ACM TACO](https://dl.acm.org/journal/taco) in
 June 2026, and is scheduled to be presented at the HiPEAC 2027 conference as
 an invited paper.
 
-Additionally, we will have a short talk on US LLVM Dev Meeting at [LLVM-ML workshop](https://discourse.llvm.org/t/llvm-dev26-llvm-ml-workshop/91148) in October 2026. Details will be added soon.
+Additionally, we presented [Protean at US LLVM Dev Meeting](https://youtu.be/tyZVgf1ZpqE?si=VBpo-gwpO2uavQtB) at [LLVM-ML workshop](https://discourse.llvm.org/t/llvm-dev26-llvm-ml-workshop/91148) in October 2026.
 
 ## License
 Protean compiler is released under a Apache License v2.0 with LLVM Exceptions License. See the LICENSE file for more details.

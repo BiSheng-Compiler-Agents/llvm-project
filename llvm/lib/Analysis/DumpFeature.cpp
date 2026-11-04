@@ -158,8 +158,7 @@ void ACPOFIExtendedFeatures::updateLoopRelatedFeatures(Function &F,
       unsigned SuccCount = std::distance(succ_begin(BB), succ_end(BB));
       if (SuccCount > 1)
         BlockWithMulSuccNum++;
-      LoopInstrCount += std::distance(BB->instructionsWithoutDebug().begin(),
-                                      BB->instructionsWithoutDebug().end());
+      LoopInstrCount += BB->size(); 
     }
   }
 
@@ -202,7 +201,7 @@ void ACPOFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
   // Sum number of instructions and successors on the way
   for (auto &BB : F) {
     SuccNum += std::distance(succ_begin(&BB), succ_end(&BB));
-    for (auto &I : BB.instructionsWithoutDebug()) {
+    for (auto &I : BB) {
       if (CallBase *CB = dyn_cast<CallBase>(&I)) {
         Function *Callee = CB->getCalledFunction();
         if (Callee && !Callee->isIntrinsic()) {
@@ -264,25 +263,24 @@ void ACPOFIExtendedFeatures::updateBBLoopCallsiteBFFeatures(
       }
 
       // If this is a conditional branch, check if it uses an argument
-      if (const auto II = dyn_cast<BranchInst>(&I))
-        if (II->isConditional()) {
-          FF[NamedFeatureIndex::ConditionalBranch]++;
-          // find the instruction where the condition is defined.
-          if (auto def = dyn_cast<Instruction>(II->getCondition())) {
-            // For all operands of def check if isa<Argument> (operand) then
-            // increment CBwithArg.
-            bool found = false;
-            for (unsigned i = 0; i < def->getNumOperands(); i++) {
-              if (isa<Argument>(def->getOperand(i))) {
-                FF[NamedFeatureIndex::CBwithArg]++;
-                found = true;
-                break;
-              }
-            }
-            if (found)
+      if (const auto *II = dyn_cast<CondBrInst>(&I)) {
+        FF[NamedFeatureIndex::ConditionalBranch]++;
+
+        if (auto *Def = dyn_cast<Instruction>(II->getCondition())) {
+          bool Found = false;
+
+          for (unsigned OpIdx = 0; OpIdx < Def->getNumOperands(); ++OpIdx) {
+            if (isa<Argument>(Def->getOperand(OpIdx))) {
+              FF[NamedFeatureIndex::CBwithArg]++;
+              Found = true;
               break;
+            }
           }
+
+          if (Found)
+            break;
         }
+      }
     }
   }
 

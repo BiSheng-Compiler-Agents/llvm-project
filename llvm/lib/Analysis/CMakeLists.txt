@@ -119,7 +119,6 @@ add_llvm_component_library(LLVMAnalysis
   DXILMetadataAnalysis.cpp
   EphemeralValuesCache.cpp
   FloatingPointPredicateUtils.cpp
-  DumpCallsite.cpp
   DumpFeature.cpp
   FunctionPropertiesAnalysis.cpp
   GlobalsModRef.cpp
@@ -138,7 +137,6 @@ add_llvm_component_library(LLVMAnalysis
   InstructionPrecedenceTracking.cpp
   InstructionSimplify.cpp
   InteractiveModelRunner.cpp
-  IR2Score.cpp
   KernelInfo.cpp
   LastRunTrackingAnalysis.cpp
   LazyBranchProbabilityInfo.cpp
@@ -192,7 +190,6 @@ add_llvm_component_library(LLVMAnalysis
   ScalarEvolutionDivision.cpp
   ScalarEvolutionNormalization.cpp
   StaticDataProfileInfo.cpp
-  SimulatedAnnealing.cpp
   StackLifetime.cpp
   StackSafetyAnalysis.cpp
   StructuralHash.cpp
@@ -233,5 +230,4 @@ add_llvm_component_library(LLVMAnalysis
   Support
   TargetParser
   TransformUtils
-  IR2Vec
   )

@@ -3272,7 +3272,8 @@ void tools::renderCommonIntegerOverflowOptions(const ArgList &Args,
 bool tools::shouldEnableVectorizerAtOLevel(const ArgList &Args, bool isSlpVec) {
   if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
     if (A->getOption().matches(options::OPT_O4) ||
-        A->getOption().matches(options::OPT_Ofast))
+        A->getOption().matches(options::OPT_Ofast) ||
+        A->getOption().matches(options::OPT_OP))
       return true;
 
     if (A->getOption().matches(options::OPT_O0))

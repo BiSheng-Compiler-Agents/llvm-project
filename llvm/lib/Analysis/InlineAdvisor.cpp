@@ -20,7 +20,6 @@
 #include "llvm/Analysis/IR2Vec.h"
 #include "llvm/Analysis/FunctionPropertiesAnalysis.h"
 #include "llvm/Analysis/InlineCost.h"
-#include "llvm/Analysis/InlineSizeEstimatorAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"

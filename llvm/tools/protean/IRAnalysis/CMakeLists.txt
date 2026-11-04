@@ -14,5 +14,6 @@ add_llvm_component_library(ProteanAnalysis
     ${MLLinkDeps}
 
     LINK_COMPONENTS
+    Analysis
     TransformUtils
 )

@@ -33,7 +33,7 @@ extern bool EnableFeatureDump;
 
 namespace llvm {
 
-class DumpFeaturePass : public PassInfoMixin<DumpFeaturePass> {
+class DumpFeaturePass : public OptionalPassInfoMixin<DumpFeaturePass> {
 public:
   PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager &AM,
                         LazyCallGraph &CG, CGSCCUpdateResult &UR);

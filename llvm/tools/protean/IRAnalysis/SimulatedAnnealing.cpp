@@ -22,7 +22,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR2Vec/IR2Vec.h"
+#include "llvm/Analysis/IR2Vec.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -660,8 +660,7 @@ double SimulatedAnnealingProtean::irAnalysisCost(
         LLVM_DEBUG(llvm::dbgs() << i.first << ":" << i.second << ", ");
       }
     } else {
-      auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
-      IR2Vec::Vector prgmVec = ir2vec.getProgramVector();
+      auto prgmVec = llvm::computeProteanModuleEmbedding(*M);
       llvm::errs() << "Collected IR2VEC Features: \n";
       for (int i = 0; i < prgmVec.size(); ++i) {
         std::string Feature = "IR2Vec_";

@@ -663,7 +663,7 @@ void LoopPartition::orderInstructions(std::vector<BasicBlock *> &BlockOrder) {
       bool InIIS = InputInstrSet.contains(Instr);
       bool InSS = StoreSet.contains(Instr);
       if (InIIS || InSS) {
-        if (isa<BranchInst>(Instr))
+        if (isa<CondBrInst, UncondBrInst>(Instr))
           HasBranches = true;
         if (InIIS && InSS)
           Duplicates++;
@@ -1074,7 +1074,7 @@ LoopPartitionGraph::generateHeaderToLoopMap() const {
       return HeaderToLoopMap;
     }
     HeaderToLoopMap[Header] = TopL;
-    for (auto *SL : TopL->getSubLoopsVector())
+    for (auto *SL : TopL->getSubLoops())
       Q.push(SL);
   }
   return HeaderToLoopMap;
@@ -1233,7 +1233,7 @@ void LoopPartitionGraph::getKeyLoopBlocks(BasicBlock **PH,
   // Preheader will be the block we start from. Generally
   *PH = SL->getLoopPreheader();
   *LoopExit = SL->getExitBlock();
-  BranchInst *GuardBranch = SL->getLoopGuardBranch();
+  auto *GuardBranch = SL->getLoopGuardBranch();
   if ((*PH == nullptr) || (*LoopExit == nullptr)) {
     *PH = nullptr;
     *LoopExit = nullptr;
@@ -1452,8 +1452,8 @@ int LoopPartitionGraph::createLoopNest(
   // Starting Basic Block must have only an unconditional branch.
   assert(StartingBB != nullptr);
   Instruction *Terminator = StartingBB->getTerminator();
-  BranchInst *Branch = dyn_cast_or_null<BranchInst>(Terminator);
-  assert((Branch != nullptr) && Branch->isUnconditional());
+  auto *Branch = dyn_cast_or_null<UncondBrInst>(Terminator);
+  assert(Branch  && "StartingBB must end in an unconditional branch");
   unsigned Index = LoopHeaderBB.size();
   PHINode *IV = Partition->getIndVarAtIndex(Index);
   struct LoopPartitionBounds LPB;
@@ -1524,8 +1524,8 @@ int LoopPartitionGraph::createLoopNest(
     HeadB.CreateBr(Exiting);
 
   // Now lets introduce the guard logic and point to appropriate blocks.
-  BranchInst *Term = dyn_cast<BranchInst>(StartingBB->getTerminator());
-  assert(Term->isUnconditional());
+  auto *Term = dyn_cast<UncondBrInst>(StartingBB->getTerminator());
+  //assert(Term->isUnconditional());
   Term->eraseFromParent();
 
   IRBuilder<> Guard(StartingBB);
@@ -1624,8 +1624,8 @@ int LoopPartitionGraph::createLoopNestFrame(
         for (BasicBlock *PBB : PredsToRemove) {
           Instruction *Term = PBB->getTerminator();
           assert(Term != nullptr);
-          assert(isa<BranchInst>(Term));
-          BranchInst *LoopEndBranch = dyn_cast<BranchInst>(Term);
+          assert((isa<CondBrInst, UncondBrInst>(Term)));
+          auto *LoopEndBranch = dyn_cast<Instruction>(Term);
 
           for (int ExitID = 0; ExitID < (int)LoopEndBranch->getNumSuccessors();
                ExitID++) {
@@ -1681,8 +1681,8 @@ int LoopPartitionGraph::createLoopNestFrame(
       for (BasicBlock *PBB : PredsToRemove) {
         Instruction *Term = PBB->getTerminator();
         assert(Term != nullptr);
-        assert(isa<BranchInst>(Term));
-        BranchInst *LoopEndBranch = dyn_cast<BranchInst>(Term);
+        assert((isa<CondBrInst, UncondBrInst>(Term)));
+        auto *LoopEndBranch = dyn_cast<Instruction>(Term);
 
         for (int ExitID = 0; ExitID < (int)LoopEndBranch->getNumSuccessors();
              ExitID++) {
@@ -1717,47 +1717,65 @@ int LoopPartitionGraph::createLoopNestFrame(
 void LoopPartitionGraph::updateInputs(
     Instruction *I, std::unordered_map<PHINode *, PHINode *> &IVMap,
     std::unordered_map<Instruction *, Instruction *> &InstMap) {
-  bool IsCall = isa<CallInst>(I);
-  bool IsPHI = isa<PHINode>(I);
-  bool IsBR = isa<BranchInst>(I);
-  CallInst *FCall = dyn_cast_or_null<CallInst>(I);
-  PHINode *PHI = dyn_cast_or_null<PHINode>(I);
-  BranchInst *BR = dyn_cast_or_null<BranchInst>(I);
-  int ICount = IsPHI ? PHI->getNumIncomingValues() : I->getNumOperands();
-  int Count = IsCall ? FCall->arg_size() : ICount;
-  if (IsBR) {
-    Count = BR->isUnconditional() ? 0 : 1;
-  }
-  for (int Idx = 0; Idx < Count; Idx++) {
-    Value *V = IsCall
-                   ? FCall->getArgOperand(Idx)
-                   : (IsPHI ? PHI->getIncomingValue(Idx) : I->getOperand(Idx));
-    if (IsBR)
+  // Successor blocks are not data inputs.
+  if (isa<UncondBrInst>(I))
+    return;
+
+  auto *FCall = dyn_cast<CallInst>(I);
+  auto *PHI = dyn_cast<PHINode>(I);
+  auto *BR = dyn_cast<CondBrInst>(I);
+
+  unsigned Count;
+  if (BR)
+    Count = 1;
+  else if (FCall)
+    Count = FCall->arg_size();
+  else if (PHI)
+    Count = PHI->getNumIncomingValues();
+  else
+    Count = I->getNumOperands();
+
+  for (unsigned Idx = 0; Idx < Count; ++Idx) {
+    Value *V;
+    if (BR)
       V = BR->getCondition();
-    assert(isa<Instruction>(V) || isa<Constant>(V) || isa<Argument>(V));
+    else if (FCall)
+      V = FCall->getArgOperand(Idx);
+    else if (PHI)
+      V = PHI->getIncomingValue(Idx);
+    else
+      V = I->getOperand(Idx);
+
+    assert(isa<Instruction>(V) || isa<Constant>(V) ||
+           isa<Argument>(V));
 
     if (isa<Constant>(V) || isa<Argument>(V))
       continue;
 
-    Instruction *Input = dyn_cast<Instruction>(V);
-    // Do not replace loop invariants.
+    auto *Input = cast<Instruction>(V);
+
+    // Preserve the original handling of loop-invariant inputs.
     BasicBlock *IBB = Input->getParent();
-    if (!L->contains(IBB) && (TemporaryBBs.count(IBB) == 0))
+    if (!L->contains(IBB) && TemporaryBBs.count(IBB) == 0)
       continue;
 
-    PHINode *PN = dyn_cast_or_null<PHINode>(V);
+    auto *PN = dyn_cast<PHINode>(V);
     Instruction *NewInput = nullptr;
-    if ((PN != nullptr) && (IVMap.find(PN) != IVMap.end())) {
-      NewInput = dyn_cast<Instruction>(IVMap[PN]);
-    } else if ((Input != nullptr) && (InstMap.find(Input) != InstMap.end())) {
+
+    if (PN && IVMap.find(PN) != IVMap.end())
+      NewInput = IVMap[PN];
+    else if (InstMap.find(Input) != InstMap.end())
       NewInput = InstMap[Input];
-    }
-    assert((NewInput != nullptr) || (PN != nullptr));
-    if (NewInput == nullptr)
+
+    assert(NewInput || PN);
+    if (!NewInput)
       continue;
-    if (IsCall)
+
+    if (BR)
+      BR->setCondition(NewInput);
+    else if (FCall)
       FCall->setArgOperand(Idx, NewInput);
-    else if (IsPHI)
+    else if (PHI)
       PHI->setIncomingValue(Idx, NewInput);
     else
       I->setOperand(Idx, NewInput);
@@ -1828,7 +1846,7 @@ bool LoopPartitionGraph::generatePartitionCode(
     // Now print a cloned instruction in the appropriate target BB.
     std::string Name = P->getName() + std::string("_") + S->getName().str();
     InstMap[S] = NewS;
-    if (isa<BranchInst>(S)) {
+    if (isa<CondBrInst, UncondBrInst>(S)) {
       // In case of a branch we are clearly creating a more complex control
       // flow than just a simple single BB partition. So we have to determine
       // if all sides of the branch go to in-partition code. If so, just create
@@ -1836,9 +1854,11 @@ bool LoopPartitionGraph::generatePartitionCode(
       // correctly and update the Body BB to reflect which BB the new
       // instructions are to be placed. To make things easier, we use HTLMap
       // to keep the mapping in order.
-      BranchInst *BR = dyn_cast<BranchInst>(NewS);
-      BranchInst *CBTerm = dyn_cast<BranchInst>(CurBody->getTerminator());
-      assert(CBTerm->isUnconditional());
+      Instruction *BR = NewS;
+      assert((isa<CondBrInst, UncondBrInst>(BR)) &&
+            "Expected the clone to remain a branch");
+
+      auto *CBTerm = cast<UncondBrInst>(CurBody->getTerminator());
       LLVM_DEBUG(dbgs() << "Branch: " << *BR << "\n");
 
       for (unsigned I = 0; I < BR->getNumSuccessors(); I++) {
@@ -1854,14 +1874,12 @@ bool LoopPartitionGraph::generatePartitionCode(
         // we extend the check from the terminator's successors to its
         // successors' successors if its that successor is a preheader.
         Instruction *SuccTerm = Successor->getTerminator();
-        if (Successor->size() == 1 && isa<BranchInst>(SuccTerm)) {
-          BranchInst *NewBR = dyn_cast<BranchInst>(SuccTerm);
-          if (NewBR->isUnconditional()) {
-            BasicBlock *NewSuccessor = NewBR->getSuccessor(0);
-            Loop *Inner = LI->getLoopFor(NewSuccessor);
-            if (Inner != nullptr && Successor == Inner->getLoopPreheader())
-              Successor = NewSuccessor;
-          }
+        if (Successor->size() == 1 && isa<UncondBrInst>(SuccTerm)) {
+          auto *NewBR = dyn_cast<UncondBrInst>(SuccTerm);
+          auto *NewSuccessor = NewBR->getSuccessor(0);
+          Loop *Inner = LI->getLoopFor(NewSuccessor);
+          if (Inner != nullptr && Successor == Inner->getLoopPreheader())
+            Successor = NewSuccessor;
         }
 
         bool SuccMade = (OldToNewBBMap.find(Successor) != OldToNewBBMap.end());
@@ -1903,7 +1921,7 @@ bool LoopPartitionGraph::generatePartitionCode(
       IRG->SetInsertPoint(NewS);
       LLVM_DEBUG(dbgs() << "BR done!\n");
     } else if (isa<PHINode>(S)) {
-      IRG->SetInsertPoint(CurBody->getFirstNonPHI());
+      IRG->SetInsertPoint(CurBody, CurBody->getFirstNonPHIIt());
       IRG->Insert(NewS, Name);
       IRG->SetInsertPoint(CurBody->getTerminator());
     } else if (isa<StoreInst>(NewS)) {
@@ -2025,7 +2043,7 @@ void LoopPartitionGraph::unlinkAndDestroyLoopNest(Loop *L) {
   while (!S.empty()) {
     Loop *Current = S.top();
     S.pop();
-    auto LV = Current->getSubLoopsVector();
+    std::vector<Loop *> LV(Current->getSubLoops().begin(), Current->getSubLoops().end());
     for (Loop *SL : LV) {
       S.push(SL);
       Current->removeChildLoop(SL);
@@ -2096,7 +2114,7 @@ void LoopPartitionGraph::deleteOldLoopBodyAndTemporaryBBs() {
 // we can handle or that this is not an induction variable.
 bool LoopPartitionGraph::getIndVarUseChain(
     Loop *Nest, PHINode *IV, Instruction *&Increment, Instruction *&Comparison,
-    BranchInst *&LoopBranch, Constant *&IncValue, bool &InclusiveEnd,
+    CondBrInst *&LoopBranch, Constant *&IncValue, bool &InclusiveEnd,
     bool &IsUnsigned) const {
   // Will only handle integer induction variables.
   if (!IV->getType()->isIntegerTy())
@@ -2136,12 +2154,10 @@ bool LoopPartitionGraph::getIndVarUseChain(
     return false;
 
   // Create Lambda function to find the branch that follows an instruction
-  auto findBranch = [](Instruction *Src, Loop *LN) -> BranchInst * {
-    for (auto U : Src->users()) {
-      // We are looking for a conditional branch.
-      auto Branch = dyn_cast<BranchInst>(U);
-      if (!Branch || Branch->isUnconditional() ||
-          (Branch->getNumSuccessors() != 2))
+  auto findBranch = [](Instruction *Src, Loop *LN) -> CondBrInst * {
+    for (auto *U : Src->users()) {
+      auto *Branch = dyn_cast<CondBrInst>(U);
+      if (!Branch)
         continue;
 
       BasicBlock *B1 = Branch->getSuccessor(0);
@@ -2151,6 +2167,7 @@ bool LoopPartitionGraph::getIndVarUseChain(
           (LN->contains(B1) && !LN->contains(B2)))
         return Branch;
     }
+
     return nullptr;
   };
 
@@ -2174,7 +2191,7 @@ bool LoopPartitionGraph::getIndVarUseChain(
   // Check successors of the PHI itself.
   ICmpInst *IVS = findCompare(dyn_cast<Instruction>(IV), false);
   if (IVS) {
-    BranchInst *BR = findBranch(IVS, Nest);
+    auto *BR = findBranch(IVS, Nest);
     IsUnsigned = IVS->isUnsigned();
     if (BR) {
       Comparison = dyn_cast<Instruction>(IVS);
@@ -2190,7 +2207,7 @@ bool LoopPartitionGraph::getIndVarUseChain(
   // sometimes used for condition checking for loops.
   IVS = findCompare(Increment, true);
   if (IVS) {
-    BranchInst *BR = findBranch(IVS, Nest);
+    auto *BR = findBranch(IVS, Nest);
     IsUnsigned = IVS->isUnsigned();
     if (BR) {
       Comparison = dyn_cast<Instruction>(IVS);
@@ -2243,7 +2260,7 @@ PHINode *LoopPartitionGraph::getNonTrivialInductionVariable(
     // increment/decrement are used to control loop iteration.
     Instruction *Increment = nullptr;
     Instruction *Comparison = nullptr;
-    BranchInst *LoopBranch = nullptr;
+    CondBrInst *LoopBranch = nullptr;
     Constant *IncValue = nullptr;
     bool InclusiveEnd = false;
     bool IsUnsigned = false;
@@ -2319,7 +2336,7 @@ bool LoopPartitionGraph::computeIterationSpaceForLoopNest(
   BasicBlock *Header = Nest->getHeader();
   ItSpaceMap[Header] = RootPart;
   // Now go over child loops
-  for (Loop *SL : Nest->getSubLoopsVector())
+  for (Loop *SL : Nest->getSubLoops())
     if (!computeIterationSpaceForLoopNest(SL, ItSpaceMap, RootPart))
       return false;
 
@@ -2696,7 +2713,7 @@ bool LoopPartitionGraph::createLoopPartitions(bool NoTransform) {
           // input due to control flow.
           if (PBB != Instr->getParent()) {
             Instruction *SrcBR = PBB->getTerminator();
-            if (!isa<BranchInst>(SrcBR))
+            if (!isa<CondBrInst, UncondBrInst>(SrcBR))
               continue;
             Queue.push(SrcBR);
             if (Visited.count(SrcBR) == 0)
@@ -2804,24 +2821,19 @@ bool LoopPartitionGraph::haveMatchingValues(Value *V0, Value *V1, Value *Start,
   return false;
 }
 
-bool LoopPartitionGraph::isUnconditionalSuccessor(BasicBlock *Src,
-                                                  BasicBlock *Dst) const {
+bool LoopPartitionGraph::isUnconditionalSuccessor(
+    BasicBlock *Src, BasicBlock *Dst) const {
   assert(Src != nullptr);
   assert(Dst != nullptr);
 
-  Instruction *Term = Src->getTerminator();
-  if ((Term == nullptr) || !isa<BranchInst>(Term))
-    return false;
+  auto *Branch =
+      dyn_cast_or_null<UncondBrInst>(Src->getTerminator());
 
-  BranchInst *Branch = dyn_cast<BranchInst>(Term);
-  if (!Branch->isUnconditional())
-    return false;
-
-  return (Branch->getSuccessor(0) == Dst);
+  return Branch && Branch->getSuccessor(0) == Dst;
 }
 
 bool LoopPartitionGraph::isBlockPartOfSubLoop(Loop *SL, BasicBlock *BB) const {
-  for (Loop *LL : SL->getSubLoopsVector()) {
+  for (Loop *LL : SL->getSubLoops()) {
     if (LL->contains(BB))
       return true;
   }
@@ -2955,38 +2967,43 @@ PHINode *LoopPartitionGraph::getInductionVariableAndBounds(
     return nullptr;
 
   Instruction *Term = Latch->getTerminator();
-  BranchInst *Branch = dyn_cast<BranchInst>(Term);
-  if (Branch == nullptr)
+
+  if (!Term || !isa<CondBrInst, UncondBrInst>(Term))
     return nullptr;
 
-  ItInsts.push_back(dyn_cast<Instruction>(Branch));
-  if (!Branch->isConditional()) {
-    // If it is then look at the single predecessor of the latch.
+  // Record the latch branch, regardless of its kind.
+  ItInsts.push_back(Term);
+
+  auto *Branch = dyn_cast<CondBrInst>(Term);
+
+  if (!Branch) {
+    // The latch is unconditional. Find the conditional branch in
+    // its single predecessor, as in the original implementation.
     BasicBlock *PreLatch = Latch->getSinglePredecessor();
-
-    if (PreLatch == nullptr)
+    if (!PreLatch)
       return nullptr;
 
-    Term = PreLatch->getTerminator();
-    Branch = dyn_cast_or_null<BranchInst>(Term);
-    if ((Branch == nullptr) || (!Branch->isConditional()))
+    Branch =
+        dyn_cast_or_null<CondBrInst>(PreLatch->getTerminator());
+    if (!Branch)
       return nullptr;
 
-    // Check that the other target of the branch is OUTSIDE of this loop.
-    for (unsigned int Idx = 0; Idx < Branch->getNumSuccessors(); Idx++) {
+    // Preserve the original requirement: every successor other than
+    // the latch must be outside L.
+    for (unsigned Idx = 0; Idx < Branch->getNumSuccessors(); ++Idx) {
       BasicBlock *Successor = Branch->getSuccessor(Idx);
 
       if (Successor == Latch)
         continue;
 
-      // If the successor ends in the same loop, then abort.
       if (L->contains(Successor))
         return nullptr;
     }
-    ItInsts.push_back(dyn_cast<Instruction>(Branch));
+
+    ItInsts.push_back(Branch);
   }
 
-  Value *BCond = Branch->getCondition();
+  Value *BCond = Branch->getCondition();  
   if (BCond == nullptr || !isa<Instruction>(BCond))
     return nullptr;
 
@@ -3186,12 +3203,11 @@ bool LoopPartitionGraph::computeIterationSpaceForBBs(
     // Lets look at how we are transiting to the next basic block within
     // the loop.
     Instruction *Terminator = CurBB->getTerminator();
-    if ((Terminator == nullptr) || (!isa<BranchInst>(Terminator)))
+    if ((Terminator == nullptr) || (!isa<CondBrInst, UncondBrInst>(Terminator)))
       return false;
 
-    BranchInst *Branch = cast<BranchInst>(Terminator);
-    if (Branch->isUnconditional()) {
-      BasicBlock *Next = Branch->getSuccessor(0);
+    if (auto *UncondBranch = dyn_cast<UncondBrInst>(Terminator)) {
+      BasicBlock *Next = UncondBranch->getSuccessor(0);
       assert(Next != nullptr);
 
       // If we are going to add a BB into stack for processing,
@@ -3230,6 +3246,7 @@ bool LoopPartitionGraph::computeIterationSpaceForBBs(
       }
     } else {
       // Conditional branch so we have true/false successors.
+      auto *Branch = cast<CondBrInst>(Terminator);
       Value *ConditionVal = Branch->getCondition();
       Instruction *Condition = dyn_cast_or_null<Instruction>(ConditionVal);
       LoopPartition *CurPart = ItSpaceMap[CurBB];
@@ -3809,7 +3826,7 @@ void createMemcpyForSmallArray(
   IRBuilder<> AllocaBuilder(StartBB->getTerminator());
   AllocaInst *NewAI = AllocaBuilder.CreateAlloca(VTy);
   OffsetToAlloca[Offset] = NewAI;
-  IRBuilder<> MemcpyBuilder(ExitBB->getFirstNonPHI());
+  IRBuilder<> MemcpyBuilder(ExitBB, ExitBB->getFirstNonPHIIt());
   Value *OffsetInst = MemcpyBuilder.CreateAdd(OuterIV, Offset);
   SmallVector<Value *, 4> Indices;
   Indices.push_back(OffsetInst);
@@ -3837,7 +3854,7 @@ bool LoopPartitionGraph::processLargeMemoryAccess(
   // Create the index within small arrays
   BasicBlock *InnerLoopHeader = LoopHeaderBB[1];
   IRBuilder<> IRB(InnerLoopHeader);
-  IRB.SetInsertPoint(InnerLoopHeader->getFirstNonPHI());
+  IRB.SetInsertPoint(InnerLoopHeader, InnerLoopHeader->getFirstNonPHIIt());
   Value *DstOffset = IRB.CreateURem(InnerIV, Step);
 
   // Using a worklist, we find all the GEPs that are used
@@ -3865,7 +3882,8 @@ bool LoopPartitionGraph::processLargeMemoryAccess(
       // If we see a phi node with offset incoming values we need to create
       // a new phi node that gets the respective small array.
       if (PHINode *PN = dyn_cast<PHINode>(Offset)) {
-        IRBuilder<> IRB(MemAddr->getParent()->getFirstNonPHI());
+        BasicBlock *InsertBB = MemAddr->getParent();
+        IRBuilder<> IRB(InsertBB, InsertBB->getFirstNonPHIIt());
         PHINode *NewPHI = IRB.CreatePHI(MemAddr->getOperand(0)->getType(),
                                         PN->getNumIncomingValues());
         for (unsigned Idx = 0; Idx < PN->getNumIncomingValues(); Idx++) {
@@ -3999,29 +4017,29 @@ unsigned LoopPartitionGraph::validatePartitions(
         continue;
 
       // Handle branches
-      if (isa<BranchInst>(Item.first)) {
-        BranchInst *Branch = dyn_cast<BranchInst>(Item.first);
-        if (Branch->isUnconditional())
-          IsError = false;
-        else {
-          Value *Cond = Branch->getCondition();
-          if (isa<ICmpInst>(Cond)) {
-            ICmpInst *ICond = dyn_cast<ICmpInst>(Cond);
-            Value *V0 = ICond->getOperand(0);
-            Value *V1 = ICond->getOperand(1);
-            bool ExitLoop = false;
-            for (auto &N : getNodes()) {
-              for (auto &IVBPair : N->getLoopBounds()) {
-                auto &LPB = IVBPair.second;
-                if (haveMatchingValues(V0, V1, LPB.Start, LPB.End)) {
-                  IsError = false;
-                  ExitLoop = true;
-                  break;
-                }
-              }
-              if (ExitLoop)
+      // Unconditional branches are accepted without a condition check.
+      if (isa<UncondBrInst>(Item.first)) {
+        IsError = false;
+      } else if (auto *Branch = dyn_cast<CondBrInst>(Item.first)) {
+        // Conditional branches retain the original loop-bound check.
+        if (auto *ICond = dyn_cast<ICmpInst>(Branch->getCondition())) {
+          Value *V0 = ICond->getOperand(0);
+          Value *V1 = ICond->getOperand(1);
+
+          bool ExitLoop = false;
+          for (auto &N : getNodes()) {
+            for (auto &IVBPair : N->getLoopBounds()) {
+              auto &LPB = IVBPair.second;
+
+              if (haveMatchingValues(V0, V1, LPB.Start, LPB.End)) {
+                IsError = false;
+                ExitLoop = true;
                 break;
+              }
             }
+
+            if (ExitLoop)
+              break;
           }
         }
       }
@@ -4385,7 +4403,7 @@ bool LoopPartitionGraph::createMallocPartitions() {
           // basic blocks of the operand and the instruction can be handled.
           if (PBB != Instr->getParent()) {
             Instruction *SrcBR = PBB->getTerminator();
-            if (!isa<BranchInst>(SrcBR))
+            if (!isa<CondBrInst, UncondBrInst>(SrcBR))
               continue;
             Queue.push(SrcBR);
             if (Visited.count(SrcBR) == 0)

@@ -437,7 +437,7 @@ protected:
   BasicBlock *findClosestDominator(Loop *SL, BasicBlock *Header,
                                    BasicBlock *BB) const;
   bool getIndVarUseChain(Loop *Nest, PHINode *IV, Instruction *&Increment,
-                         Instruction *&Comparison, BranchInst *&LoopBranch,
+                         Instruction *&Comparison, CondBrInst *&LoopBranch,
                          Constant *&IncValue, bool &InclusiveEnd,
                          bool &IsUnsigned) const;
   PHINode *getNonTrivialInductionVariable(Loop *Nest,
