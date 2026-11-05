@@ -937,6 +937,7 @@ int main(int argc, char **argv) {
           Pipeline += Recipes;
         }
 
+        // Only SA children need to collect and publish features for scoring.
         Pipeline += ",protean-collect-features";
 
         if (UseProteanCollect) {

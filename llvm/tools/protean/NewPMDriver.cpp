@@ -17,7 +17,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
-#include "llvm/Analysis/ProteanCollectFeatures.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/Config/llvm-config.h"
@@ -507,7 +506,6 @@ bool llvm::runPassPipeline(
         Out->os(), ThinLTOLinkOut ? &ThinLTOLinkOut->os() : nullptr));
     break;
   }
-  MPM.addPass(CollectFeaturesPass());
   FunctionPassManager FPM;
   LoopPassManager LPM;
   FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
