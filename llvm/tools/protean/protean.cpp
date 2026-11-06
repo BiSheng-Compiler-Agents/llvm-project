@@ -42,6 +42,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Remarks/HotnessThresholdParser.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
@@ -60,9 +61,9 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Debugify.h"
 #include <algorithm>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
-#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -382,6 +383,17 @@ static cl::opt<bool>
                 cl::desc("Enable IPC for module level shared memory"),
                 cl::init(false));
 
+static cl::opt<std::string> ForcedRecipe(
+    "protean-force-recipe",
+    cl::desc("Override a Protean run with a fixed recipe, e.g. EDCAAAA"),
+    cl::init(""));
+
+static cl::opt<std::string>
+    ForcedRecipeModule("protean-force-module",
+                       cl::desc("Exact source filename to apply the forced "
+                                "recipe to. All other modules receive -O3."),
+                       cl::init(""));
+
 //===----------------------------------------------------------------------===//
 // CodeGen-related helper functions.
 //
@@ -489,6 +501,41 @@ static bool shouldForceLegacyPM() {
       return true;
   }
   return false;
+}
+
+// Parse Protean's provded recipe.
+static bool parseForcedRecipe(StringRef Text,
+                              PhaseOrderGeneratorBase::Recipes &Result) {
+  using Recipe = PhaseOrderGeneratorBase::Recipe;
+
+  Result.clear();
+  if (Text.empty())
+    return false;
+
+  for (char C : Text) {
+    switch (C) {
+    case 'A':
+      Result.push_back(Recipe::A);
+      break;
+    case 'B':
+      Result.push_back(Recipe::B);
+      break;
+    case 'C':
+      Result.push_back(Recipe::C);
+      break;
+    case 'D':
+      Result.push_back(Recipe::D);
+      break;
+    case 'E':
+      Result.push_back(Recipe::E);
+      break;
+    default:
+      errs() << "Invalid recipe character " << C
+             << "': expected A, B, C, D, or E\n";
+      return false;
+    }
+  }
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -793,7 +840,43 @@ int main(int argc, char **argv) {
     //     the Pipeline according to the randomly generated recipe.
     // At the end of the Simulated Annealing loop the parent process will just
     // exit/return from here.
-    if (UseProteanInitialPasses.getValue()) {
+    const bool HasForcedRecipe = !ForcedRecipe.getValue().empty();
+    const bool HasForcedModule = !ForcedRecipeModule.getValue().empty();
+
+    if (HasForcedRecipe != HasForcedModule) {
+      errs() << "--protean-force-recipe and --protean-force-module "
+                "must be supplied together\n";
+      return 1;
+    }
+
+    if (HasForcedRecipe) {
+      PhaseOrderGeneratorBase::Recipes CustomRecipe;
+      if (!parseForcedRecipe(ForcedRecipe.getValue(), CustomRecipe))
+        return 1;
+
+      const bool ForceThisModule =
+          M->getSourceFileName() == StringRef(ForcedRecipeModule.getValue());
+      if (ForceThisModule) {
+        auto PassMap = createPassMap();
+        const std::string Recipes =
+            PhaseOrderGeneratorBase::recipesToPasses(CustomRecipe, PassMap);
+
+        if (Recipes.empty()) {
+          errs() << "Forced recipe produced an empty pipeline\n";
+          return 1;
+        }
+
+        // Replace the previously selected pipeline.
+        Pipeline = "annotation2metadata,forceattrs,inferattrs,coro-early,";
+        Pipeline += Recipes;
+
+        errs() << "Protean: forcing recipe " << ForcedRecipe.getValue()
+               << " for module " << M->getName() << '\n'
+               << "Protean: pipeline: " << Pipeline << '\n';
+      } else {
+        Pipeline = "default<O3>";
+      }
+    } else if (UseProteanInitialPasses.getValue()) {
       LLVM_DEBUG(dbgs() << "ProteanCompiler :: Beginning Simulated Annealing for Module "
              << M->getName() << "\n");
 
@@ -945,6 +1028,7 @@ int main(int argc, char **argv) {
           Pipeline += Recipes;
         }
 
+        // Only SA children need to collect and publish features for scoring.
         Pipeline += ",protean-collect-features";
 
         if (UseProteanCollect) {

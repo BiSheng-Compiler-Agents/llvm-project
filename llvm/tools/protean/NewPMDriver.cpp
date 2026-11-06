@@ -17,7 +17,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
-#include "llvm/Analysis/ProteanCollectFeatures.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/Config/llvm-config.h"
@@ -31,6 +30,7 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
@@ -42,6 +42,8 @@
 
 using namespace llvm;
 using namespace opt_tool;
+
+extern cl::opt<bool> UseProteanInitialPasses;
 
 namespace llvm {
 cl::opt<bool> DebugifyEach(
@@ -475,6 +477,10 @@ bool llvm::runPassPipeline(
 
   // Add passes according to the -passes options.
   if (!PassPipeline.empty()) {
+    // Expand default<O3> to the full pipeline for the SA baseline and forced
+    // fallback. Restore the flag before execution so SA still publishes features.
+    SaveAndRestore<bool> DisableInitialPipeline(UseProteanInitialPasses.getValue(),
+                                              false);
     if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
@@ -507,7 +513,6 @@ bool llvm::runPassPipeline(
         Out->os(), ThinLTOLinkOut ? &ThinLTOLinkOut->os() : nullptr));
     break;
   }
-  MPM.addPass(CollectFeaturesPass());
   FunctionPassManager FPM;
   LoopPassManager LPM;
   FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
