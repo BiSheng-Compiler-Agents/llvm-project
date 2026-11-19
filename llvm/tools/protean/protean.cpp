@@ -42,6 +42,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Remarks/HotnessThresholdParser.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
@@ -60,9 +61,9 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Debugify.h"
 #include <algorithm>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
-#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -292,6 +293,25 @@ static cl::list<std::string>
     PassPlugins("load-pass-plugin",
                 cl::desc("Load passes from plugin library"));
 
+static cl::list<std::string>
+    FileOverrides("file-override",
+                  cl::desc("Pass file=recipe pairs to assign specific "
+                           "source files a recipe, or O3, or SA. Files are "
+                           "determined by module->getSourceFileName(). "
+                           "Recipes are validated when its file is compiled."));
+
+namespace {
+enum class PassOptimizer { SA, O3, Recipe };
+} // namespace
+
+static cl::opt<PassOptimizer> DefaultOpt(
+    "default-opt",
+    cl::desc("Default module optimization when not set by -file-override"),
+    cl::values(clEnumValN(PassOptimizer::SA, "SA",
+                          "Protean simulated annealing"),
+               clEnumValN(PassOptimizer::O3, "O3", "O3")),
+    cl::init(PassOptimizer::SA));
+
 //===----------------------------------------------------------------------===//
 // Protean Compiler Hyperparameters
 //
@@ -489,6 +509,43 @@ static bool shouldForceLegacyPM() {
       return true;
   }
   return false;
+}
+
+// Parse Protean's provded recipe.
+static bool parseForcedRecipe(StringRef Text,
+                              PhaseOrderGeneratorBase::Recipes &Result) {
+  using Recipe = PhaseOrderGeneratorBase::Recipe;
+
+  Result.clear();
+  if (Text.empty()) {
+    errs() << "Invalid recipe (empty)\n";
+    return false;
+  }
+
+  for (char C : Text) {
+    switch (C) {
+    case 'A':
+      Result.push_back(Recipe::A);
+      break;
+    case 'B':
+      Result.push_back(Recipe::B);
+      break;
+    case 'C':
+      Result.push_back(Recipe::C);
+      break;
+    case 'D':
+      Result.push_back(Recipe::D);
+      break;
+    case 'E':
+      Result.push_back(Recipe::E);
+      break;
+    default:
+      errs() << "Invalid recipe character '" << C
+             << "': expected A, B, C, D, or E\n";
+      return false;
+    }
+  }
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -784,175 +841,247 @@ int main(int argc, char **argv) {
     if (OptLevelOz)
       Pipeline = "default<Oz>";
 
-    // If protean is enabled goto the Simulated Annealing process:
-    //   The Simulated Annealing process first creates an random recipe then it
-    //   creates a forked process.
-    //     (1) The parent process wait's for the child process and continue the
-    //     Simulated Annealing main loop.
-    //     (2) The child process will return back here and modify
-    //     the Pipeline according to the randomly generated recipe.
-    // At the end of the Simulated Annealing loop the parent process will just
-    // exit/return from here.
+    bool TrailingFeatureCollection = false;
     if (UseProteanInitialPasses.getValue()) {
-      LLVM_DEBUG(dbgs() << "ProteanCompiler :: Beginning Simulated Annealing for Module "
-             << M->getName() << "\n");
+      // TODO: Protean's initial passes are NOT run when Protean is directly
+      // invoked.
+      PassOptimizer OptType = DefaultOpt;
+      std::string OverrideRecipe; // Only used when the recipe is directly set.
 
-      auto IsO3BaselineState =
-        [](const SimulatedAnnealingProtean::State &S) {
-        return S.empty();
-      };
+      if (!FileOverrides.empty()) {
+        LLVM_DEBUG(dbgs() << "Checking FileRecipe overrides for "
+                          << M->getSourceFileName() << '\n');
 
-      auto StateName =
-        [&](const SimulatedAnnealingProtean::State &S) -> std::string {
-        if (IsO3BaselineState(S))
-          return "O3";
-        return PhaseOrderGeneratorBase::recipesToString(S);
-      };       
-      std::string Recipes;
-      if (OutputFilename == "-") {
-        errs() << "Specify an output.o file with -o (e.g., -o output.bc) to "
-                  "activate Simulated Annealing\n";
-        return 1;
-      }
+        bool HasOverride = false;
+        for (const std::string &FileOverride : FileOverrides) {
+          auto [File, RecipeRaw] = StringRef(FileOverride).rsplit('=');
+          std::string Recipe = RecipeRaw.upper();
 
-      // TODO: gracefully exit earlier in the compile pipeline so this never
-      // needs to run.
-      if (CostType == IRCostFunction::IRAnalysis &&
-          !llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR")) {
-        llvm::errs() << "environment variable BISHENG_ACPO_DIR not set\n";
-        return -1;
-      }
+          // Compare against sourceFileName() so files with the same name are
+          // distinguished.
+          if (M->getSourceFileName() != File) {
+            continue;
+          }
+          HasOverride = true;
 
-      SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
-          RngVal, CoolingSchedule, MaxTemperature, MinTemperature,
-          MaxIterations, CostType, OutputFilename, ProteanOutputTable,
-          UseProteanCollect, ModLevelIPC, UseAOTModel, InitialSampleSize,
-          MutationRate, CrossoverRate, PopulationSize, CrossoverType,
-          MutationType);
-      PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
-      if (ProteanOutputTable) {
-        errs() << "Protean is performing SA on module: " << M->getName() << "\n";
-        std::stringstream ss;
-        ss << std::setw(9) << "Iteration  ";
-        ss << std::setw(20) << "Current State";
-        ss << std::setw(20) << "Next State";
-        ss << std::setw(20) << "Best State";
-        ss << std::setw(20) << "Current Cost";
-        ss << std::setw(20) << "Next Cost";
-        ss << std::setw(20) << "Best Cost";
-        ss << std::setw(20) << "Temperature\n";
-        dbgs() << ss.str();
-      }
-
-      SAProtean.run();
-
-      if (SAProtean.getFinished()) {
-        LLVM_DEBUG(dbgs() << "ProteanCompiler :: Simulated Annealing finished running for "
-                          << "Module " << M->getName() << "\n");
-
-        if (IsO3BaselineState(SAProtean.getFinalState())) {
-          LLVM_DEBUG(dbgs() << "The final recipe accepted is: default<O3>\n");
-        } else {
-          LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
-                            << PhaseOrderGeneratorBase::recipesToPasses(
-                                   SAProtean.getFinalState(), PassMap)
-                            << "\n");
-        }
-
-        std::string RecipeStr = StateName(SAProtean.getFinalState());
-        std::error_code EC;
-
-        std::string RecipeOutputFilename = OutputFilename;
-        RecipeOutputFilename.insert(RecipeOutputFilename.find_last_of("."),
-                                    "-" + RecipeStr);
-
-        std::filesystem::copy(RecipeOutputFilename, OutputFilename.getValue(), EC);
-        if (EC) {
-          errs() << EC.message() << '\n';
-          return 1;
-        }
-
-        if (!ThinLinkBitcodeFile.empty()) {
-          std::string RecipeThinLinkBitcodeFile = ThinLinkBitcodeFile;
-          RecipeThinLinkBitcodeFile.insert(
-              RecipeThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
-
-          std::filesystem::copy(RecipeThinLinkBitcodeFile,
-                                ThinLinkBitcodeFile.getValue(), EC);
-          if (EC) {
-            errs() << EC.message() << '\n';
-            return 1;
+          if (Recipe == "O3") {
+            OptType = PassOptimizer::O3;
+          } else if (Recipe == "SA") {
+            OptType = PassOptimizer::SA;
+          } else {
+            OptType = PassOptimizer::Recipe;
+            OverrideRecipe = Recipe;
           }
         }
 
-        if (Out.get())
-          Out.get()->keep();
-        if (ThinLinkOut.get())
-          ThinLinkOut.get()->keep();
-        if (RemarksFile.get())
-          RemarksFile.get()->keep();
+        if (!HasOverride) {
+          LLVM_DEBUG(dbgs() << M->getSourceFileName()
+                            << " had no override specified\n");
+        }
+      }
 
-        return 0;
+      if (OptType == PassOptimizer::Recipe) {
+        auto PassMap = createPassMap();
+        PhaseOrderGeneratorBase::Recipes CustomRecipe;
+        if (!parseForcedRecipe(OverrideRecipe, CustomRecipe))
+          return 1;
+        const std::string Recipes =
+            PhaseOrderGeneratorBase::recipesToPasses(CustomRecipe, PassMap);
+
+        if (Recipes.empty()) {
+          errs() << "Forced recipe produced an empty pipeline\n";
+          return 1;
+        }
+
+        // Replace the previously selected pipeline.
+        Pipeline = "annotation2metadata,forceattrs,inferattrs,coro-early,";
+        Pipeline += Recipes;
+
+        errs() << "Protean: forcing recipe " << OverrideRecipe << " for module "
+               << M->getName() << '\n';
+        LLVM_DEBUG(dbgs() << "Protean: pipeline: " << Pipeline << '\n';);
+
+      } else if (OptType == PassOptimizer::O3) {
+        Pipeline = "default<O3>";
       } else {
-        const auto &CurState = SAProtean.getCurState();
-        bool IsO3Baseline = IsO3BaselineState(CurState);
-        std::string RecipeStr = StateName(CurState);
+        // If protean is enabled goto the Simulated Annealing process:
+        //   The Simulated Annealing process first creates an random recipe then
+        //   it creates a forked process.
+        //     (1) The parent process wait's for the child process and continue
+        //     the Simulated Annealing main loop. (2) The child process will
+        //     return back here and modify the Pipeline according to the
+        //     randomly generated recipe.
+        // At the end of the Simulated Annealing loop the parent process will
+        // just exit/return from here.
 
-        std::error_code EC;
-        sys::fs::OpenFlags Flags =
-            OutputAssembly ? sys::fs::OF_TextWithCRLF : sys::fs::OF_None;
+        LLVM_DEBUG(
+            dbgs()
+            << "ProteanCompiler :: Beginning Simulated Annealing for Module "
+            << M->getName() << "\n");
 
-        std::string NewOutputFilename = OutputFilename;
-        NewOutputFilename.insert(NewOutputFilename.find_last_of("."),
-                                 "-" + RecipeStr);
+        auto IsO3BaselineState = [](const SimulatedAnnealingProtean::State &S) {
+          return S.empty();
+        };
 
-        Out.reset(new ToolOutputFile(NewOutputFilename, EC, Flags));
-        if (EC) {
-          errs() << EC.message() << '\n';
+        auto StateName =
+            [&](const SimulatedAnnealingProtean::State &S) -> std::string {
+          if (IsO3BaselineState(S))
+            return "O3";
+          return PhaseOrderGeneratorBase::recipesToString(S);
+        };
+        std::string Recipes;
+        if (OutputFilename == "-") {
+          errs() << "Specify an output.o file with -o (e.g., -o output.bc) to "
+                    "activate Simulated Annealing\n";
           return 1;
         }
 
-        if (!ThinLinkBitcodeFile.empty()) {
-          std::string NewThinLinkBitcodeFile = ThinLinkBitcodeFile;
-          NewThinLinkBitcodeFile.insert(
-              NewThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
+        // TODO: gracefully exit earlier in the compile pipeline so this never
+        // needs to run.
+        if (CostType == IRCostFunction::IRAnalysis &&
+            !llvm::sys::Process::GetEnv("BISHENG_ACPO_DIR")) {
+          llvm::errs() << "environment variable BISHENG_ACPO_DIR not set\n";
+          return -1;
+        }
 
-          ThinLinkOut.reset(
-              new ToolOutputFile(NewThinLinkBitcodeFile, EC, sys::fs::OF_None));
+        SimulatedAnnealingProtean SAProtean = SimulatedAnnealingProtean(
+            RngVal, CoolingSchedule, MaxTemperature, MinTemperature,
+            MaxIterations, CostType, OutputFilename, ProteanOutputTable,
+            UseProteanCollect, ModLevelIPC, UseAOTModel, InitialSampleSize,
+            MutationRate, CrossoverRate, PopulationSize, CrossoverType,
+            MutationType);
+        PhaseOrderGeneratorBase::PMap PassMap = createPassMap();
+        if (ProteanOutputTable) {
+          errs() << "Protean is performing SA on module: " << M->getName()
+                 << "\n";
+          std::stringstream ss;
+          ss << std::setw(9) << "Iteration  ";
+          ss << std::setw(20) << "Current State";
+          ss << std::setw(20) << "Next State";
+          ss << std::setw(20) << "Best State";
+          ss << std::setw(20) << "Current Cost";
+          ss << std::setw(20) << "Next Cost";
+          ss << std::setw(20) << "Best Cost";
+          ss << std::setw(20) << "Temperature\n";
+          dbgs() << ss.str();
+        }
 
+        SAProtean.run();
+
+        if (SAProtean.getFinished()) {
+          LLVM_DEBUG(
+              dbgs()
+              << "ProteanCompiler :: Simulated Annealing finished running for "
+              << "Module " << M->getName() << "\n");
+
+          if (IsO3BaselineState(SAProtean.getFinalState())) {
+            LLVM_DEBUG(dbgs() << "The final recipe accepted is: default<O3>\n");
+          } else {
+            LLVM_DEBUG(dbgs() << "The final recipe accepted is: "
+                              << PhaseOrderGeneratorBase::recipesToPasses(
+                                     SAProtean.getFinalState(), PassMap)
+                              << "\n");
+          }
+
+          std::string RecipeStr = StateName(SAProtean.getFinalState());
+          std::error_code EC;
+
+          std::string RecipeOutputFilename = OutputFilename;
+          RecipeOutputFilename.insert(RecipeOutputFilename.find_last_of("."),
+                                      "-" + RecipeStr);
+
+          std::filesystem::copy(RecipeOutputFilename, OutputFilename.getValue(),
+                                EC);
           if (EC) {
             errs() << EC.message() << '\n';
             return 1;
           }
-        }
 
-        LLVM_DEBUG(dbgs() << "Running Recipe: " << RecipeStr << "\n");
+          if (!ThinLinkBitcodeFile.empty()) {
+            std::string RecipeThinLinkBitcodeFile = ThinLinkBitcodeFile;
+            RecipeThinLinkBitcodeFile.insert(
+                RecipeThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
 
-        if (!Pipeline.empty())
-          Pipeline += ",";
+            std::filesystem::copy(RecipeThinLinkBitcodeFile,
+                                  ThinLinkBitcodeFile.getValue(), EC);
+            if (EC) {
+              errs() << EC.message() << '\n';
+              return 1;
+            }
+          }
 
-        if (IsO3Baseline) {
-          Pipeline += "default<O3>";
+          if (Out.get())
+            Out.get()->keep();
+          if (ThinLinkOut.get())
+            ThinLinkOut.get()->keep();
+          if (RemarksFile.get())
+            RemarksFile.get()->keep();
+
+          return 0;
         } else {
-          std::string Recipes =
-              PhaseOrderGeneratorBase::recipesToPasses(CurState, PassMap);
+          const auto &CurState = SAProtean.getCurState();
+          bool IsO3Baseline = IsO3BaselineState(CurState);
+          std::string RecipeStr = StateName(CurState);
 
-          Pipeline += "annotation2metadata,forceattrs,inferattrs,coro-early";
+          std::error_code EC;
+          sys::fs::OpenFlags Flags =
+              OutputAssembly ? sys::fs::OF_TextWithCRLF : sys::fs::OF_None;
 
-          if (!Recipes.empty())
+          std::string NewOutputFilename = OutputFilename;
+          NewOutputFilename.insert(NewOutputFilename.find_last_of("."),
+                                   "-" + RecipeStr);
+
+          Out.reset(new ToolOutputFile(NewOutputFilename, EC, Flags));
+          if (EC) {
+            errs() << EC.message() << '\n';
+            return 1;
+          }
+
+          if (!ThinLinkBitcodeFile.empty()) {
+            std::string NewThinLinkBitcodeFile = ThinLinkBitcodeFile;
+            NewThinLinkBitcodeFile.insert(
+                NewThinLinkBitcodeFile.find_last_of("."), "-" + RecipeStr);
+
+            ThinLinkOut.reset(new ToolOutputFile(NewThinLinkBitcodeFile, EC,
+                                                 sys::fs::OF_None));
+
+            if (EC) {
+              errs() << EC.message() << '\n';
+              return 1;
+            }
+          }
+
+          LLVM_DEBUG(dbgs() << "Running Recipe: " << RecipeStr << "\n");
+
+          if (!Pipeline.empty())
             Pipeline += ",";
 
-          Pipeline += Recipes;
+          if (IsO3Baseline) {
+            Pipeline += "default<O3>";
+          } else {
+            std::string Recipes =
+                PhaseOrderGeneratorBase::recipesToPasses(CurState, PassMap);
+
+            Pipeline += "annotation2metadata,forceattrs,inferattrs,coro-early";
+
+            if (!Recipes.empty())
+              Pipeline += ",";
+
+            Pipeline += Recipes;
+          }
+
+          Pipeline += ",protean-collect-features";
+          TrailingFeatureCollection = true;
+          if (UseProteanCollect) {
+            LLVM_DEBUG(dbgs() << "ProteanCollectFeature Pass is enabled!\n");
+          }
+
+          LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
         }
-
-        Pipeline += ",protean-collect-features";
-
-        if (UseProteanCollect) {
-          LLVM_DEBUG(dbgs() << "ProteanCollectFeature Pass is enabled!\n");
-        }
-
-        LLVM_DEBUG(dbgs() << "Pipeline: " << Pipeline << "\n");
       }
+    } else if (!FileOverrides.empty()) {
+      errs() << "-file-override requires -protean\n";
+      return 1;
     }
 
     OutputKind OK = OK_NoOutput;
@@ -970,12 +1099,12 @@ int main(int argc, char **argv) {
     // The user has asked to use the new pass manager and provided a pipeline
     // string. Hand off the rest of the functionality to the new code for that
     // layer.
-    return runPassPipeline(argv[0], *M, TM.get(), &TLII, Out.get(),
-                           ThinLinkOut.get(), RemarksFile.get(), Pipeline,
-                           PluginList, OK, VK, PreserveAssemblyUseListOrder,
-                           PreserveBitcodeUseListOrder, EmitSummaryIndex,
-                           EmitModuleHash, EnableDebugify,
-                           VerifyDebugInfoPreserve, UnifiedLTO)
+    return runPassPipeline(
+               argv[0], *M, TM.get(), &TLII, Out.get(), ThinLinkOut.get(),
+               RemarksFile.get(), Pipeline, PluginList, OK, VK,
+               PreserveAssemblyUseListOrder, PreserveBitcodeUseListOrder,
+               EmitSummaryIndex, EmitModuleHash, EnableDebugify,
+               VerifyDebugInfoPreserve, UnifiedLTO, TrailingFeatureCollection)
                ? 0
                : 1;
   }

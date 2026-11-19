@@ -72,7 +72,8 @@ bool runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                      bool ShouldPreserveBitcodeUseListOrder,
                      bool EmitSummaryIndex, bool EmitModuleHash,
                      bool EnableDebugify, bool VerifyDIPreserve,
-                     bool UnifiedLTO = false);
+                     bool UnifiedLTO = false,
+                     bool TrailingFeatureCollection = false);
 } // namespace llvm
 
 #endif
