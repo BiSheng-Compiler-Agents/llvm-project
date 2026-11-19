@@ -43,6 +43,9 @@ static cl::opt<std::string>
 cl::opt<std::string>
     ProteanModelFile("protean-dump-file", cl::init("-"), cl::Hidden,
                      cl::desc("Name of a file to store feature data in."));
+cl::opt<std::string>
+    IR2VecModelFile("ir2vec-dump-file", cl::Hidden,
+                    cl::desc("Name of a file to store embeddings in."));
 cl::opt<std::string> ProteanLoopModelFile(
     "protean-loop-dump-file", cl::init("-"), cl::Hidden,
     cl::desc("Name of a file to store loop feature data in."));
