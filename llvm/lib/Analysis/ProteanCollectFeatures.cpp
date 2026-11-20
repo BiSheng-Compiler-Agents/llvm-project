@@ -91,6 +91,7 @@ struct SharedMemoryData {
 
 // In "llvm/lib/Analysis/ModelDataCollector.cpp"
 extern llvm::cl::opt<std::string> ProteanModelFile;
+extern llvm::cl::opt<std::string> IR2VecModelFile;
 extern llvm::cl::opt<std::string> ProteanLoopModelFile;
 
 // In "llvm/lib/Passes/PassBuilderPipelines.cpp"
@@ -143,11 +144,15 @@ static std::string encodeIdentifier(StringRef Identifier) {
 }
 
 class ModelDataProteanCollector : public ModelDataCollector {
+  IR2Vec::Vector Embeddings;
+  formatted_raw_ostream *IR2VecOS;
+
 public:
-  ModelDataProteanCollector(formatted_raw_ostream &OS, bool OnlyMandatory,
+  ModelDataProteanCollector(formatted_raw_ostream &OS,
+                            formatted_raw_ostream *IR2VecOS, bool OnlyMandatory,
                             std::string OutputFileName, std::string TempOutput)
-      : ModelDataCollector(OS, OutputFileName), OnlyMandatory(OnlyMandatory),
-        TempOutput(TempOutput) {}
+      : ModelDataCollector(OS, OutputFileName), IR2VecOS(IR2VecOS),
+        OnlyMandatory(OnlyMandatory), TempOutput(TempOutput) {}
 
   void collectFeatures(CallBase *CB, InlineAdvisor *IA,
                        FunctionAnalysisManager *FAM,
@@ -342,14 +347,7 @@ public:
       if (shareModule())
         writeModule(M);
       else {
-        auto ir2vec = IR2Vec::Embeddings(*M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
-        LLVM_DEBUG(
-            dbgs() << "IR2Vec embedding: ";
-            for (double i : ir2vec.getProgramVector()) {
-              dbgs() << i << ' ';
-            }
-            dbgs() << '\n';);
-        writeFeatures(FinalFeatures, ir2vec.getProgramVector());
+        writeFeatures(FinalFeatures, Embeddings);
       }
     }
   }
@@ -386,7 +384,9 @@ public:
     return result;
   }
 
-  void writeFeatures(std::unordered_map<std::string, float> FinalFeatures, IR2Vec::Vector &pgmVector) {
+  void
+  writeFeatures(const std::unordered_map<std::string, float> &FinalFeatures,
+                const IR2Vec::Vector &pgmVector) {
     // Append PID when naming shared memory object to enable parallel
     // compilation.
     llvm::sys::Process::Pid Pid = getppid();
@@ -576,12 +576,30 @@ public:
     TempOutput = Out;
   }
 
+  void collectIR2VecEmbeddings(llvm::Module &M) {
+    auto Ir2vec =
+        IR2Vec::Embeddings(M, IR2Vec::IR2VecMode::FlowAware, IR2VEC_DIMENSION);
+    Embeddings = Ir2vec.getProgramVector();
+    LLVM_DEBUG(dbgs() << "IR2Vec embedding: ";
+               llvm::interleave(Embeddings, dbgs(), " "); dbgs() << '\n';);
+  }
+
+  void printIR2Vec() {
+    if (IR2VecOS) {
+      llvm::interleave(
+          Embeddings, *IR2VecOS,
+          [&](double D) { *IR2VecOS << featureToString<double>(D); }, ",");
+      *IR2VecOS << '\n';
+    }
+  }
+
   void printOutput(LLVMContext &Context, StringRef Header = "") {
     if (Header.empty())
       Header = OutputHeader;
     std::string FileName = getOutputFileName();
     if (FileName.empty() || FileName == "-" || isEmptyOutputFile()) {
       ModelDataCollector::setOutput(Header.str() + TempOutput);
+      printIR2Vec();
       return;
     }
 
@@ -597,6 +615,7 @@ public:
       return;
     }
     ModelDataCollector::setOutput(TempOutput);
+    printIR2Vec();
   }
 
   bool getOnlyMandatory() { return OnlyMandatory; }
@@ -3256,11 +3275,32 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
   raw_fd_ostream RawOS(ProteanModelFile.getValue(), EC, sys::fs::CD_OpenAlways,
                        sys::fs::FA_Write, sys::fs::OF_Append);
   formatted_raw_ostream OS(RawOS);
-  ModelDataProteanCollector MDC(OS, /*OnlyMandatory*/ false, ProteanModelFile,
+  if (EC) {
+    M.getContext().emitError("Cannot open Protean dump file '" +
+                             ProteanModelFile.getValue() + "':" + EC.message());
+  }
+
+  std::optional<raw_fd_ostream> IR2VecRawOS;
+  std::optional<formatted_raw_ostream> IR2VecOS;
+  if (!IR2VecModelFile.empty()) {
+    IR2VecRawOS.emplace(IR2VecModelFile.getValue(), EC, sys::fs::CD_OpenAlways,
+                        sys::fs::FA_Write, sys::fs::OF_Append);
+    if (EC) {
+      M.getContext().emitError("Cannot open IR2Vec dump file '" +
+                               IR2VecModelFile.getValue() +
+                               "':" + EC.message());
+      IR2VecRawOS.reset();
+    } else {
+      IR2VecOS.emplace(IR2VecRawOS.value());
+    }
+  }
+  ModelDataProteanCollector MDC(OS, IR2VecOS ? &IR2VecOS.value() : nullptr,
+                                /*OnlyMandatory*/ false, ProteanModelFile,
                                 /*TempOutput*/ "");
 
   // Module level collection
   MDC.collectFeatures(&M, IA, &FAM, &AM);
+
   MDC.updateOutput(/*PrintHeader*/ true, &M, nullptr, /*CB*/ nullptr,
                    /*L*/ nullptr);
   MDC.updateOutput(/*PrintHeader*/ false, &M, nullptr, /*CB*/ nullptr,
@@ -3324,7 +3364,11 @@ PreservedAnalyses CollectFeaturesPass::run(Module &M,
       MDC.updateOutput(/*PrintHeader*/ false, &M, &F, /*CB*/ nullptr, L);
     }
   }
+
+  if (UseProteanInitialPasses || (FeatureDump && IR2VecOS))
+    MDC.collectIR2VecEmbeddings(M);
   MDC.addModuleFlags(&M);
+
   if (FeatureDump) {
     MDC.formatOutput();
     MDC.printOutput(M.getContext());
@@ -3341,7 +3385,7 @@ PreservedAnalyses LoopCollectFeaturesPass::run(Loop &L, LoopAnalysisManager &AM,
                        sys::fs::CD_OpenAlways, sys::fs::FA_Write,
                        sys::fs::OF_Append);
   formatted_raw_ostream OS(RawOS);
-  ModelDataProteanCollector MDC(OS, /*OnlyMandatory*/ false,
+  ModelDataProteanCollector MDC(OS, nullptr, /*OnlyMandatory*/ false,
                                 ProteanLoopModelFile, /*TempOutput*/ "");
   Function *F = L.getHeader()->getParent();
   Module *M = F->getParent();
